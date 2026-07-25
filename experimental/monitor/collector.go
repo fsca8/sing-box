@@ -239,8 +239,10 @@ func (c *Collector) CloseConnection(id string, durationMs int64, upload, downloa
 		idx := (c.connBuf.head + i) % c.connBuf.cap
 		rec := &c.connBuf.buf[idx]
 		if rec.ID == id {
-			rec.EndTime = nowMs()
-			rec.DurationMs = durationMs
+			now := nowMs()
+			rec.EndTime = &now
+			dur := durationMs
+			rec.DurationMs = &dur
 			rec.UploadBytes = upload
 			rec.DownloadBytes = download
 			rec.Closed = true
@@ -250,7 +252,7 @@ func (c *Collector) CloseConnection(id string, durationMs int64, upload, downloa
 				c.db.WriteConnectionClosed(rec)
 			}
 
-			ev := Event{Type: "connection_closed", Timestamp: rec.EndTime, Connection: rec}
+			ev := Event{Type: "connection_closed", Timestamp: *rec.EndTime, Connection: rec}
 			c.pushJSON(ev)
 			break
 		}
@@ -263,8 +265,10 @@ func (c *Collector) CloseConnByDest(destKey string) {
 	conn, exists := c.connMap[destKey]
 	if exists {
 		conn.Closed = true
-		conn.EndTime = nowMs()
-		conn.DurationMs = conn.EndTime - conn.StartTime
+		now := nowMs()
+		conn.EndTime = &now
+		dur := now - conn.StartTime
+		conn.DurationMs = &dur
 		if c.db != nil {
 			c.db.WriteConnectionClosed(conn)
 		}
@@ -277,8 +281,10 @@ func (c *Collector) CloseConnByDest(destKey string) {
 		for _, conn := range c.connMap {
 			if conn.Host == destKey || (conn.Host == "" && conn.DestIP == destKey) {
 				conn.Closed = true
-				conn.EndTime = nowMs()
-				conn.DurationMs = conn.EndTime - conn.StartTime
+					now := nowMs()
+					conn.EndTime = &now
+					dur := now - conn.StartTime
+					conn.DurationMs = &dur
 				if c.db != nil {
 					c.db.WriteConnectionClosed(conn)
 				}
@@ -309,7 +315,9 @@ func (c *Collector) EvaluateAlerts(conn ConnectionRecord) {
 		var value int64
 		switch rule.Metric {
 		case "dns_latency":
-			value = conn.DNSLatencyUs
+			if conn.DNSLatencyUs != nil {
+				value = *conn.DNSLatencyUs
+			}
 		case "tcp_latency":
 			value = conn.TCPLatencyUs
 		case "tls_latency":

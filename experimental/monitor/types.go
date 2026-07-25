@@ -51,14 +51,14 @@ type ConnectionRecord struct {
 	Chain         string `json:"chain,omitempty"`
 	TCPLatencyUs  int64  `json:"tcp_latency_us"`
 	TLSLatencyUs  int64  `json:"tls_latency_us"`
-	DNSLatencyUs  int64  `json:"dns_latency_us,omitempty"`
+	DNSLatencyUs  *int64 `json:"dns_latency_us,omitempty"`
 	TLSVersion    string `json:"tls_version,omitempty"`
 	CipherSuite   string `json:"cipher_suite,omitempty"`
 	UploadBytes   int64  `json:"upload_bytes"`
 	DownloadBytes int64  `json:"download_bytes"`
 	StartTime     int64  `json:"start_time"`
-	EndTime       int64  `json:"end_time,omitempty"`
-	DurationMs    int64  `json:"duration_ms,omitempty"`
+	EndTime       *int64 `json:"end_time,omitempty"`
+	DurationMs    *int64 `json:"duration_ms,omitempty"`
 	Error         string `json:"error,omitempty"`
 	Closed        bool   `json:"closed"`
 }

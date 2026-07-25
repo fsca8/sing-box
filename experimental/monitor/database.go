@@ -389,8 +389,40 @@ func (d *Database) QueryConnections(since int64, limit int) ([]ConnectionRecord,
 	var records []ConnectionRecord
 	for rows.Next() {
 		var r ConnectionRecord
-		if err := rows.Scan(&r.ID, &r.Host, &r.Domain, &r.DestIP, &r.DestPort, &r.Rule, &r.Outbound, &r.TCPLatencyUs, &r.TLSLatencyUs, &r.DNSLatencyUs, &r.TLSVersion, &r.CipherSuite, &r.UploadBytes, &r.DownloadBytes, &r.StartTime, &r.EndTime, &r.DurationMs, &r.Closed); err != nil {
+		var (
+			dnsLatVal  interface{}
+			tlsVerVal  interface{}
+			tlsCipVal  interface{}
+			endTimeVal interface{}
+			durMsVal   interface{}
+		)
+		if err := rows.Scan(&r.ID, &r.Host, &r.Domain, &r.DestIP, &r.DestPort, &r.Rule, &r.Outbound, &r.TCPLatencyUs, &r.TLSLatencyUs, &dnsLatVal, &tlsVerVal, &tlsCipVal, &r.UploadBytes, &r.DownloadBytes, &r.StartTime, &endTimeVal, &durMsVal, &r.Closed); err != nil {
 			continue
+		}
+		if dnsLatVal != nil {
+			if v, ok := dnsLatVal.(int64); ok {
+				r.DNSLatencyUs = &v
+			}
+		}
+		if tlsVerVal != nil {
+			if v, ok := tlsVerVal.(string); ok {
+				r.TLSVersion = v
+			}
+		}
+		if tlsCipVal != nil {
+			if v, ok := tlsCipVal.(string); ok {
+				r.CipherSuite = v
+			}
+		}
+		if endTimeVal != nil {
+			if v, ok := endTimeVal.(int64); ok {
+				r.EndTime = &v
+			}
+		}
+		if durMsVal != nil {
+			if v, ok := durMsVal.(int64); ok {
+				r.DurationMs = &v
+			}
 		}
 		records = append(records, r)
 	}
