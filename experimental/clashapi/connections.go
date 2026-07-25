@@ -10,6 +10,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/trafficcontrol"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing/common"
 	F "github.com/sagernet/sing/common/format"
 	"github.com/sagernet/sing/common/json"
@@ -34,6 +35,28 @@ func connectionsSnapshot(trafficManager *trafficcontrol.Manager) render.M {
 	connections := common.Filter(trafficManager.Connections(), func(metadata *trafficcontrol.TrackerMetadata) bool {
 		return metadata.OutboundType != C.TypeDNS
 	})
+
+	// Sync traffic to SQLite for monitor (non-blocking)
+	if mc := monitor.Get(); mc != nil {
+		records := make([]monitor.TrafficRecord, 0, len(connections))
+		for _, meta := range connections {
+			// Skip connections without ConnID (e.g. DoH infrastructure connections)
+			if meta.ConnID == "" {
+				continue
+			}
+			records = append(records, monitor.TrafficRecord{
+				ConnID:   meta.ConnID,
+				Upload:   meta.Upload.Load(),
+				Download: meta.Download.Load(),
+				Outbound: meta.Outbound,
+				Host:     meta.Metadata.Domain,
+				Domain:   meta.Metadata.Domain,
+				DestIP:   meta.Metadata.Destination.String(),
+			})
+		}
+		mc.SyncTraffic(records)
+	}
+
 	return render.M{
 		"downloadTotal": downlinkTotal,
 		"uploadTotal":   uplinkTotal,

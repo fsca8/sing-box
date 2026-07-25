@@ -1,0 +1,469 @@
+// experimental/monitor/database.go
+package monitor
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+// dbEvent is a write event sent to the async batch writer.
+type dbEvent struct {
+	Kind string      // "dns", "connection", "connection_closed", "alert"
+	Data interface{} // *DNSRecord, *ConnectionRecord, *AlertEvent
+}
+
+// Database wraps SQLite with async batch writing.
+type Database struct {
+	db            *sql.DB
+	writeCh       chan dbEvent
+	done          chan struct{}
+	closed        atomic.Bool
+	dropped       atomic.Int64
+	batchSize     int
+	flushInterval time.Duration
+	wg            sync.WaitGroup
+}
+
+// NewDatabase opens (or creates) the SQLite database and starts the async writer.
+func NewDatabase(path string) (*Database, error) {
+	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=5000")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1) // SQLite is single-writer
+
+	d := &Database{
+		db:            db,
+		writeCh:       make(chan dbEvent, 4096),
+		done:          make(chan struct{}),
+		batchSize:     100,
+		flushInterval: 200 * time.Millisecond,
+	}
+
+	if err := d.migrate(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	// Clear connection/traffic/alert data on each session start (DNS persists across sessions)
+	db.Exec("DELETE FROM connection_records")
+	db.Exec("DELETE FROM traffic_snapshots")
+	db.Exec("DELETE FROM alert_events")
+
+	// Ensure UNIQUE index for per-connection upsert — key is conn_id
+	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_conn_id ON connection_records(conn_id)")
+
+	d.wg.Add(1)
+	go d.writer()
+
+	return d, nil
+}
+
+func (d *Database) migrate() error {
+	schema := `
+	CREATE TABLE IF NOT EXISTS dns_records (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp_ms INTEGER NOT NULL,
+		domain TEXT NOT NULL,
+		qtype TEXT NOT NULL DEFAULT 'A',
+		transport TEXT DEFAULT '',
+		latency_us INTEGER DEFAULT 0,
+		status TEXT DEFAULT '',
+		answers TEXT DEFAULT '[]',
+		ttl INTEGER DEFAULT 0,
+		is_rejected INTEGER DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_dns_timestamp ON dns_records(timestamp_ms);
+
+	CREATE TABLE IF NOT EXISTS connection_records (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		conn_id TEXT NOT NULL,
+		host TEXT,
+		domain TEXT DEFAULT '',
+		dest_ip TEXT DEFAULT '',
+		dest_port INTEGER DEFAULT 0,
+		rule TEXT DEFAULT '',
+		outbound TEXT DEFAULT '',
+		tcp_latency_us INTEGER DEFAULT 0,
+		tls_latency_us INTEGER DEFAULT 0,
+		dns_latency_us INTEGER,
+		tls_version TEXT,
+		tls_cipher TEXT,
+		upload_bytes INTEGER DEFAULT 0,
+		download_bytes INTEGER DEFAULT 0,
+		start_time_ms INTEGER NOT NULL,
+		end_time_ms INTEGER,
+		duration_ms INTEGER,
+		closed INTEGER DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_conn_conn_id ON connection_records(conn_id);
+	CREATE INDEX IF NOT EXISTS idx_conn_timestamp ON connection_records(start_time_ms);
+
+	CREATE TABLE IF NOT EXISTS alert_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp_ms INTEGER NOT NULL,
+		rule_id INTEGER DEFAULT 0,
+		rule_name TEXT DEFAULT '',
+		connection_id TEXT,
+		actual_value INTEGER DEFAULT 0,
+		threshold INTEGER DEFAULT 0,
+		message TEXT DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_alert_timestamp ON alert_events(timestamp_ms);
+
+	CREATE TABLE IF NOT EXISTS traffic_snapshots (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp_ms INTEGER NOT NULL,
+		upload_bytes INTEGER NOT NULL DEFAULT 0,
+		download_bytes INTEGER NOT NULL DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_traffic_timestamp ON traffic_snapshots(timestamp_ms);
+	`
+	_, err := d.db.Exec(schema)
+	return err
+}
+
+// ---- Async writer (hot-path safe) ----
+
+func (d *Database) writer() {
+	defer d.wg.Done()
+
+	const maxBatch = 200
+	batch := make([]dbEvent, 0, maxBatch)
+	ticker := time.NewTicker(d.flushInterval)
+	defer ticker.Stop()
+
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		d.flushBatch(batch)
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case e, ok := <-d.writeCh:
+			if !ok {
+				flush()
+				return
+			}
+			batch = append(batch, e)
+			if len(batch) >= d.batchSize {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		}
+	}
+}
+
+func (d *Database) flushBatch(batch []dbEvent) {
+	tx, err := d.db.Begin()
+	if err != nil {
+		d.dropped.Add(int64(len(batch)))
+		return
+	}
+
+	insertDNS := `INSERT INTO dns_records (timestamp_ms, domain, qtype, transport, latency_us, status, answers, ttl, is_rejected) VALUES (?,?,?,?,?,?,?,?,?)`
+	insertConn := `INSERT INTO connection_records (conn_id, host, domain, dest_ip, dest_port, rule, outbound, tcp_latency_us, tls_latency_us, dns_latency_us, tls_version, tls_cipher, upload_bytes, download_bytes, start_time_ms, end_time_ms, duration_ms, closed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	updateConnClosed := `UPDATE connection_records SET end_time_ms=?, duration_ms=?, upload_bytes=?, download_bytes=?, closed=1 WHERE conn_id=?`
+	updateConnClosedByDest := `UPDATE connection_records SET end_time_ms=?, duration_ms=?, closed=1 WHERE dest_ip=?`
+	insertAlert := `INSERT INTO alert_events (timestamp_ms, rule_id, rule_name, connection_id, actual_value, threshold, message) VALUES (?,?,?,?,?,?,?)`
+	updateConnMeta := `UPDATE connection_records SET host = COALESCE(NULLIF(?, ''), host), outbound = COALESCE(NULLIF(?, ''), outbound) WHERE conn_id = ?`
+	upsertConnLat := `INSERT INTO connection_records (conn_id, dest_ip, domain, outbound, tcp_latency_us, tls_latency_us, start_time_ms) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(conn_id) DO UPDATE SET dest_ip = COALESCE(NULLIF(excluded.dest_ip, ''), connection_records.dest_ip), tcp_latency_us = MAX(connection_records.tcp_latency_us, excluded.tcp_latency_us), tls_latency_us = MAX(connection_records.tls_latency_us, excluded.tls_latency_us), domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain), outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound)`
+
+	stmtDNS, _ := tx.Prepare(insertDNS)
+	stmtConn, _ := tx.Prepare(insertConn)
+	stmtClosed, _ := tx.Prepare(updateConnClosed)
+	stmtClosedDst, _ := tx.Prepare(updateConnClosedByDest)
+	stmtAlert, _ := tx.Prepare(insertAlert)
+	stmtMeta, _ := tx.Prepare(updateConnMeta)
+	stmtLat, _ := tx.Prepare(upsertConnLat)
+	defer func() {
+		if stmtDNS != nil {
+			stmtDNS.Close()
+		}
+		if stmtConn != nil {
+			stmtConn.Close()
+		}
+		if stmtClosed != nil {
+			stmtClosed.Close()
+		}
+		if stmtClosedDst != nil {
+			stmtClosedDst.Close()
+		}
+		if stmtAlert != nil {
+			stmtAlert.Close()
+		}
+		if stmtMeta != nil {
+			stmtMeta.Close()
+		}
+		if stmtLat != nil {
+			stmtLat.Close()
+		}
+	}()
+
+	for _, e := range batch {
+		switch e.Kind {
+		case "dns":
+			r := e.Data.(*DNSRecord)
+			answersJSON, _ := json.Marshal(r.Answers)
+			stmtDNS.Exec(r.Timestamp, r.Domain, r.QType, r.Transport, r.LatencyUs, r.Status, string(answersJSON), r.TTL, boolToInt(r.IsRejected))
+		case "connection":
+			r := e.Data.(*ConnectionRecord)
+			stmtConn.Exec(
+				r.ID, r.Host, r.Domain, r.DestIP, r.DestPort, r.Rule, r.Outbound,
+				r.TCPLatencyUs, r.TLSLatencyUs, r.DNSLatencyUs, r.TLSVersion, r.CipherSuite,
+				r.UploadBytes, r.DownloadBytes, r.StartTime,
+				r.EndTime, r.DurationMs, boolToInt(r.Closed),
+			)
+		case "connection_closed":
+			r := e.Data.(*ConnectionRecord)
+			stmtClosed.Exec(r.EndTime, r.DurationMs, r.UploadBytes, r.DownloadBytes, r.ID)
+		case "connection_closed_by_dest":
+			destKey := e.Data.(string)
+			stmtClosedDst.Exec(time.Now().UnixMilli(), 0, destKey)
+		case "connection_meta":
+			meta := e.Data.(map[string]string)
+			stmtMeta.Exec(meta["host"], meta["outbound"], meta["conn_id"])
+		case "connection_latency":
+			r := e.Data.(map[string]interface{})
+			stmtLat.Exec(r["conn_id"], r["dest_ip"], r["domain"], r["outbound"], r["tcp"], r["tls"], r["start_time"])
+		case "alert":
+			r := e.Data.(*AlertEvent)
+			stmtAlert.Exec(r.Timestamp, r.RuleID, r.RuleName, r.ConnectionID, r.ActualValue, r.Threshold, r.Message)
+		case "traffic_sync":
+			records := e.Data.(*[]TrafficRecord)
+			upsertTraffic := `INSERT INTO connection_records
+				(conn_id, dest_ip, upload_bytes, download_bytes, outbound, host, domain, start_time_ms)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(conn_id) DO UPDATE SET
+				upload_bytes = excluded.upload_bytes,
+				download_bytes = excluded.download_bytes,
+				outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound),
+				host = COALESCE(NULLIF(excluded.host, ''), connection_records.host),
+				domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain)`
+			stmtTraffic, _ := tx.Prepare(upsertTraffic)
+			now := time.Now().UnixMilli()
+			for _, tr := range *records {
+				connID := tr.ConnID
+				if connID == "" {
+					connID = fmt.Sprintf("%s@%d", tr.Host, now)
+				}
+				stmtTraffic.Exec(connID, tr.DestIP, tr.Upload, tr.Download, tr.Outbound, tr.Host, tr.Domain, now)
+			}
+			stmtTraffic.Close()
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		d.dropped.Add(int64(len(batch)))
+	}
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ---- Non-blocking writes (hot-path) ----
+
+func (d *Database) WriteDNS(r *DNSRecord) {
+	select {
+	case d.writeCh <- dbEvent{Kind: "dns", Data: r}:
+	default:
+		d.dropped.Add(1)
+	}
+}
+
+func (d *Database) WriteConnection(r *ConnectionRecord) {
+	select {
+	case d.writeCh <- dbEvent{Kind: "connection", Data: r}:
+	default:
+		d.dropped.Add(1)
+	}
+}
+
+func (d *Database) WriteConnectionClosed(r *ConnectionRecord) {
+	select {
+	case d.writeCh <- dbEvent{Kind: "connection_closed", Data: r}:
+	default:
+		d.dropped.Add(1)
+	}
+}
+
+func (d *Database) WriteConnectionClosedByDest(destKey string) {
+	if destKey == "" {
+		return
+	}
+	select {
+	case d.writeCh <- dbEvent{Kind: "connection_closed_by_dest", Data: destKey}:
+	default:
+		d.dropped.Add(1)
+	}
+}
+
+func (d *Database) UpdateConnectionMeta(connID, host, outbound string) {
+	if connID == "" || (host == "" && outbound == "") {
+		return
+	}
+	select {
+	case d.writeCh <- dbEvent{Kind: "connection_meta", Data: map[string]string{"conn_id": connID, "host": host, "outbound": outbound}}:
+	default:
+		d.dropped.Add(1)
+	}
+}
+
+func (d *Database) WriteConnectionMeta(connID, host, outbound string) {
+	d.UpdateConnectionMeta(connID, host, outbound)
+}
+
+func (d *Database) WriteLatency(connID, destIP, domain, outbound string, tcpLatencyUs, tlsLatencyUs int64) {
+	if connID == "" || (tcpLatencyUs == 0 && tlsLatencyUs == 0) {
+		return
+	}
+	select {
+	case d.writeCh <- dbEvent{Kind: "connection_latency", Data: map[string]interface{}{"conn_id": connID, "dest_ip": destIP, "domain": domain, "outbound": outbound, "tcp": tcpLatencyUs, "tls": tlsLatencyUs, "start_time": time.Now().UnixMilli()}}:
+	default:
+		d.dropped.Add(1)
+	}
+}
+
+func (d *Database) WriteAlert(r *AlertEvent) {
+	select {
+	case d.writeCh <- dbEvent{Kind: "alert", Data: r}:
+	default:
+		d.dropped.Add(1)
+	}
+}
+
+// DroppedRecords returns the count of events dropped due to full buffer.
+func (d *Database) DroppedRecords() int64 {
+	return d.dropped.Load()
+}
+
+// ---- Query methods ----
+
+func (d *Database) QueryDNS(since int64, limit int) ([]DNSRecord, error) {
+	rows, err := d.db.Query(
+		"SELECT timestamp_ms, domain, qtype, transport, latency_us, status, answers, ttl, is_rejected FROM dns_records WHERE timestamp_ms > ? ORDER BY timestamp_ms DESC LIMIT ?",
+		since, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []DNSRecord
+	for rows.Next() {
+		var r DNSRecord
+		var answersJSON string
+		if err := rows.Scan(&r.Timestamp, &r.Domain, &r.QType, &r.Transport, &r.LatencyUs, &r.Status, &answersJSON, &r.TTL, &r.IsRejected); err != nil {
+			continue
+		}
+		json.Unmarshal([]byte(answersJSON), &r.Answers)
+		records = append(records, r)
+	}
+	return records, nil
+}
+
+func (d *Database) QueryConnections(since int64, limit int) ([]ConnectionRecord, error) {
+	rows, err := d.db.Query(
+		"SELECT conn_id, host, domain, dest_ip, dest_port, rule, outbound, tcp_latency_us, tls_latency_us, dns_latency_us, tls_version, tls_cipher, upload_bytes, download_bytes, start_time_ms, end_time_ms, duration_ms, closed FROM connection_records WHERE start_time_ms > ? ORDER BY start_time_ms DESC LIMIT ?",
+		since, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []ConnectionRecord
+	for rows.Next() {
+		var r ConnectionRecord
+		if err := rows.Scan(&r.ID, &r.Host, &r.Domain, &r.DestIP, &r.DestPort, &r.Rule, &r.Outbound, &r.TCPLatencyUs, &r.TLSLatencyUs, &r.DNSLatencyUs, &r.TLSVersion, &r.CipherSuite, &r.UploadBytes, &r.DownloadBytes, &r.StartTime, &r.EndTime, &r.DurationMs, &r.Closed); err != nil {
+			continue
+		}
+		records = append(records, r)
+	}
+	return records, nil
+}
+
+func (d *Database) QueryAlerts(since int64, limit int) ([]AlertEvent, error) {
+	rows, err := d.db.Query(
+		"SELECT timestamp_ms, rule_id, rule_name, connection_id, actual_value, threshold, message FROM alert_events WHERE timestamp_ms > ? ORDER BY timestamp_ms DESC LIMIT ?",
+		since, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []AlertEvent
+	for rows.Next() {
+		var e AlertEvent
+		if err := rows.Scan(&e.Timestamp, &e.RuleID, &e.RuleName, &e.ConnectionID, &e.ActualValue, &e.Threshold, &e.Message); err != nil {
+			continue
+		}
+		events = append(events, e)
+	}
+	return events, nil
+}
+
+func (d *Database) QueryStats() (uploadTotal, downloadTotal int64, err error) {
+	err = d.db.QueryRow(
+		"SELECT COALESCE(SUM(upload_bytes), 0), COALESCE(SUM(download_bytes), 0) FROM connection_records WHERE closed = 1",
+	).Scan(&uploadTotal, &downloadTotal)
+	return
+}
+
+// Cleanup deletes records older than the given thresholds.
+func (d *Database) Cleanup(dnsDays, connDays, alertDays int) error {
+	now := time.Now().UnixMilli()
+	dnsCutoff := now - int64(dnsDays)*86400000
+	connCutoff := now - int64(connDays)*86400000
+	alertCutoff := now - int64(alertDays)*86400000
+
+	_, err := d.db.Exec("DELETE FROM dns_records WHERE timestamp_ms < ?", dnsCutoff)
+	if err != nil {
+		return err
+	}
+	_, err = d.db.Exec("DELETE FROM connection_records WHERE start_time_ms < ? AND closed = 1", connCutoff)
+	if err != nil {
+		return err
+	}
+	_, err = d.db.Exec("DELETE FROM alert_events WHERE timestamp_ms < ?", alertCutoff)
+	return err
+}
+
+// Close gracefully shuts down the writer and closes the database.
+func (d *Database) Close() error {
+	if d.closed.Swap(true) {
+		return nil // already closed
+	}
+	close(d.writeCh)
+	d.wg.Wait()
+	close(d.done)
+	return d.db.Close()
+}
+
+// SyncTraffic bulk-updates upload/download for active connections.
+// Uses async channel — does not block caller.
+func (d *Database) SyncTraffic(records []TrafficRecord) {
+	if len(records) == 0 {
+		return
+	}
+	select {
+	case d.writeCh <- dbEvent{Kind: "traffic_sync", Data: &records}:
+	default:
+		d.dropped.Add(1)
+	}
+}
