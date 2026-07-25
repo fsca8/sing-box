@@ -454,13 +454,14 @@ func (c *Collector) Close() error {
 
 // TrafficRecord holds per-connection traffic at a point in time.
 type TrafficRecord struct {
-	ConnID   string
-	DestIP   string
-	Upload   int64
-	Download int64
-	Outbound string
-	Host     string
-	Domain   string
+	ConnID      string
+	DestIP      string
+	Upload      int64
+	Download    int64
+	Outbound    string
+	Host        string
+	Domain      string
+	ProcessPath string
 }
 
 // SyncTraffic bulk-updates upload/download for active connections.

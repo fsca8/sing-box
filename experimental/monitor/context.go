@@ -11,6 +11,7 @@ type DialMeta struct {
 	ConnID       string // unique per-connection ID (e.g. "google.com-1234567890")
 	TargetDomain string // original target domain (e.g. "google.com")
 	OutboundTag  string // outbound tag (e.g. "direct", "my-vless")
+	ProcessPath  string // process path (e.g. "C:\Program Files\chrome.exe"), from find_process
 }
 
 // ContextWithDialMeta attaches dial metadata to the context.

@@ -52,6 +52,12 @@ func connectionsSnapshot(trafficManager *trafficcontrol.Manager) render.M {
 				Host:     meta.Metadata.Domain,
 				Domain:   meta.Metadata.Domain,
 				DestIP:   meta.Metadata.Destination.String(),
+				ProcessPath: func() string {
+					if meta.Metadata.ProcessInfo != nil {
+						return meta.Metadata.ProcessInfo.ProcessPath
+					}
+					return ""
+				}(),
 			})
 		}
 		mc.SyncTraffic(records)
