@@ -386,7 +386,7 @@ func (d *Database) QueryDNS(since int64, limit int) ([]DNSRecord, error) {
 
 func (d *Database) QueryConnections(since int64, limit int) ([]ConnectionRecord, error) {
 	rows, err := d.db.Query(
-		"SELECT conn_id, host, domain, dest_ip, dest_port, rule, outbound, tcp_latency_us, tls_latency_us, dns_latency_us, tls_version, tls_cipher, upload_bytes, download_bytes, start_time_ms, end_time_ms, duration_ms, closed FROM connection_records WHERE start_time_ms > ? ORDER BY start_time_ms DESC LIMIT ?",
+		"SELECT conn_id, host, domain, dest_ip, dest_port, rule, outbound, tcp_latency_us, tls_latency_us, dns_latency_us, tls_version, tls_cipher, upload_bytes, download_bytes, start_time_ms, end_time_ms, duration_ms, closed, process_path FROM connection_records WHERE start_time_ms > ? ORDER BY start_time_ms DESC LIMIT ?",
 		since, limit,
 	)
 	if err != nil {
@@ -403,8 +403,9 @@ func (d *Database) QueryConnections(since int64, limit int) ([]ConnectionRecord,
 			tlsCipVal  interface{}
 			endTimeVal interface{}
 			durMsVal   interface{}
+			procPathVal interface{}
 		)
-		if err := rows.Scan(&r.ID, &r.Host, &r.Domain, &r.DestIP, &r.DestPort, &r.Rule, &r.Outbound, &r.TCPLatencyUs, &r.TLSLatencyUs, &dnsLatVal, &tlsVerVal, &tlsCipVal, &r.UploadBytes, &r.DownloadBytes, &r.StartTime, &endTimeVal, &durMsVal, &r.Closed); err != nil {
+		if err := rows.Scan(&r.ID, &r.Host, &r.Domain, &r.DestIP, &r.DestPort, &r.Rule, &r.Outbound, &r.TCPLatencyUs, &r.TLSLatencyUs, &dnsLatVal, &tlsVerVal, &tlsCipVal, &r.UploadBytes, &r.DownloadBytes, &r.StartTime, &endTimeVal, &durMsVal, &r.Closed, &procPathVal); err != nil {
 			continue
 		}
 		if dnsLatVal != nil {
@@ -430,6 +431,11 @@ func (d *Database) QueryConnections(since int64, limit int) ([]ConnectionRecord,
 		if durMsVal != nil {
 			if v, ok := durMsVal.(int64); ok {
 				r.DurationMs = &v
+			}
+		}
+		if procPathVal != nil {
+			if v, ok := procPathVal.(string); ok {
+				r.ProcessPath = v
 			}
 		}
 		records = append(records, r)

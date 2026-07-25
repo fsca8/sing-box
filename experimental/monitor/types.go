@@ -63,6 +63,7 @@ type ConnectionRecord struct {
 	DurationMs    *int64 `json:"duration_ms,omitempty"`
 	Error         string `json:"error,omitempty"`
 	Closed        bool   `json:"closed"`
+	ProcessPath   string `json:"process_path,omitempty"`
 }
 
 type AlertRule struct {
