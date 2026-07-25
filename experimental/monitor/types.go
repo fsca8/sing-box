@@ -16,13 +16,14 @@ type DNSRecord struct {
 }
 
 type TCPRecord struct {
-	Timestamp int64  `json:"timestamp"`
-	Remote    string `json:"remote"`
-	ConnID    string `json:"conn_id,omitempty"`
-	Domain    string `json:"domain,omitempty"`
-	Outbound  string `json:"outbound,omitempty"`
-	LatencyUs int64  `json:"latency_us"`
-	Error     string `json:"error,omitempty"`
+	Timestamp   int64  `json:"timestamp"`
+	Remote      string `json:"remote"`
+	ConnID      string `json:"conn_id,omitempty"`
+	Domain      string `json:"domain,omitempty"`
+	Outbound    string `json:"outbound,omitempty"`
+	LatencyUs   int64  `json:"latency_us"`
+	Error       string `json:"error,omitempty"`
+	ProcessPath string `json:"process_path,omitempty"`
 }
 
 type TLSRecord struct {
@@ -36,6 +37,7 @@ type TLSRecord struct {
 	Version     string `json:"version,omitempty"`
 	CipherSuite string `json:"cipher_suite,omitempty"`
 	Error       string `json:"error,omitempty"`
+	ProcessPath string `json:"process_path,omitempty"`
 }
 
 type ConnectionRecord struct {

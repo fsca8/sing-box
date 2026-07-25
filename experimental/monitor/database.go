@@ -183,7 +183,7 @@ func (d *Database) flushBatch(batch []dbEvent) {
 	updateConnClosedByDest := `UPDATE connection_records SET end_time_ms=?, duration_ms=?, closed=1 WHERE dest_ip=?`
 	insertAlert := `INSERT INTO alert_events (timestamp_ms, rule_id, rule_name, connection_id, actual_value, threshold, message) VALUES (?,?,?,?,?,?,?)`
 	updateConnMeta := `UPDATE connection_records SET host = COALESCE(NULLIF(?, ''), host), outbound = COALESCE(NULLIF(?, ''), outbound) WHERE conn_id = ?`
-	upsertConnLat := `INSERT INTO connection_records (conn_id, dest_ip, domain, outbound, tcp_latency_us, tls_latency_us, start_time_ms) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(conn_id) DO UPDATE SET dest_ip = COALESCE(NULLIF(excluded.dest_ip, ''), connection_records.dest_ip), tcp_latency_us = MAX(connection_records.tcp_latency_us, excluded.tcp_latency_us), tls_latency_us = MAX(connection_records.tls_latency_us, excluded.tls_latency_us), domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain), outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound)`
+	upsertConnLat := `INSERT INTO connection_records (conn_id, dest_ip, domain, outbound, tcp_latency_us, tls_latency_us, start_time_ms, process_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(conn_id) DO UPDATE SET dest_ip = COALESCE(NULLIF(excluded.dest_ip, ''), connection_records.dest_ip), tcp_latency_us = MAX(connection_records.tcp_latency_us, excluded.tcp_latency_us), tls_latency_us = MAX(connection_records.tls_latency_us, excluded.tls_latency_us), domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain), outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound), process_path = COALESCE(NULLIF(excluded.process_path, ''), connection_records.process_path)`
 
 	stmtDNS, _ := tx.Prepare(insertDNS)
 	stmtConn, _ := tx.Prepare(insertConn)
@@ -241,7 +241,8 @@ func (d *Database) flushBatch(batch []dbEvent) {
 			stmtMeta.Exec(meta["host"], meta["outbound"], meta["conn_id"])
 		case "connection_latency":
 			r := e.Data.(map[string]interface{})
-			stmtLat.Exec(r["conn_id"], r["dest_ip"], r["domain"], r["outbound"], r["tcp"], r["tls"], r["start_time"])
+			pp, _ := r["process_path"].(string)
+			stmtLat.Exec(r["conn_id"], r["dest_ip"], r["domain"], r["outbound"], r["tcp"], r["tls"], r["start_time"], pp)
 		case "alert":
 			r := e.Data.(*AlertEvent)
 			stmtAlert.Exec(r.Timestamp, r.RuleID, r.RuleName, r.ConnectionID, r.ActualValue, r.Threshold, r.Message)
@@ -334,12 +335,12 @@ func (d *Database) WriteConnectionMeta(connID, host, outbound string) {
 	d.UpdateConnectionMeta(connID, host, outbound)
 }
 
-func (d *Database) WriteLatency(connID, destIP, domain, outbound string, tcpLatencyUs, tlsLatencyUs int64) {
+func (d *Database) WriteLatency(connID, destIP, domain, outbound string, tcpLatencyUs, tlsLatencyUs int64, processPath string) {
 	if connID == "" || (tcpLatencyUs == 0 && tlsLatencyUs == 0) {
 		return
 	}
 	select {
-	case d.writeCh <- dbEvent{Kind: "connection_latency", Data: map[string]interface{}{"conn_id": connID, "dest_ip": destIP, "domain": domain, "outbound": outbound, "tcp": tcpLatencyUs, "tls": tlsLatencyUs, "start_time": time.Now().UnixMilli()}}:
+	case d.writeCh <- dbEvent{Kind: "connection_latency", Data: map[string]interface{}{"conn_id": connID, "dest_ip": destIP, "domain": domain, "outbound": outbound, "tcp": tcpLatencyUs, "tls": tlsLatencyUs, "start_time": time.Now().UnixMilli(), "process_path": processPath}}:
 	default:
 		d.dropped.Add(1)
 	}
