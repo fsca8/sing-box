@@ -113,7 +113,7 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 			StartTime:    r.Timestamp,
 		}
 		if r.ProcessPath != "" {
-			conn.Host = r.ProcessPath
+			conn.ProcessPath = r.ProcessPath
 		}
 		c.connMap[key] = conn
 	} else {
@@ -125,7 +125,7 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 			conn.Outbound = r.Outbound
 		}
 		if r.ProcessPath != "" {
-			conn.Host = r.ProcessPath
+			conn.ProcessPath = r.ProcessPath
 		}
 	}
 	c.mu.Unlock()
@@ -183,7 +183,7 @@ func (c *Collector) RecordTLS(r TLSRecord) {
 			StartTime:    r.Timestamp,
 		}
 		if r.ProcessPath != "" {
-			conn.Host = r.ProcessPath
+			conn.ProcessPath = r.ProcessPath
 		}
 		c.connMap[key] = conn
 		if c.db != nil {
