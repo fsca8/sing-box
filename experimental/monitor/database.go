@@ -51,11 +51,6 @@ func NewDatabase(path string) (*Database, error) {
 		return nil, err
 	}
 
-	// Clear connection/traffic/alert data on each session start (DNS persists across sessions)
-	db.Exec("DELETE FROM connection_records")
-	db.Exec("DELETE FROM traffic_snapshots")
-	db.Exec("DELETE FROM alert_events")
-
 	// Ensure UNIQUE index for per-connection upsert — key is conn_id
 	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_conn_id ON connection_records(conn_id)")
 
