@@ -112,6 +112,9 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 			TCPLatencyUs: r.LatencyUs,
 			StartTime:    r.Timestamp,
 		}
+		if r.ProcessPath != "" {
+			conn.Host = r.ProcessPath
+		}
 		c.connMap[key] = conn
 	} else {
 		conn.TCPLatencyUs = r.LatencyUs
@@ -121,12 +124,15 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 		if r.Outbound != "" {
 			conn.Outbound = r.Outbound
 		}
+		if r.ProcessPath != "" {
+			conn.Host = r.ProcessPath
+		}
 	}
 	c.mu.Unlock()
 
 	// Sync latency to SQLite (per-connection INSERT, traffic_sync upserts same row by conn_id)
 	if c.db != nil {
-		c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, r.LatencyUs, 0)
+		c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, r.LatencyUs, 0, r.ProcessPath)
 	}
 
 	ev := Event{Type: "tcp", Timestamp: r.Timestamp}
@@ -161,7 +167,7 @@ func (c *Collector) RecordTLS(r TLSRecord) {
 		}
 		// Sync latency + host to SQLite
 		if c.db != nil {
-			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs)
+			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs, r.ProcessPath)
 			c.db.WriteConnectionMeta(key, r.ServerName, "")
 		}
 	} else {
@@ -176,9 +182,12 @@ func (c *Collector) RecordTLS(r TLSRecord) {
 			TLSVersion:   r.Version,
 			StartTime:    r.Timestamp,
 		}
+		if r.ProcessPath != "" {
+			conn.Host = r.ProcessPath
+		}
 		c.connMap[key] = conn
 		if c.db != nil {
-			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs)
+			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs, r.ProcessPath)
 			c.db.WriteConnectionMeta(key, r.ServerName, "")
 		}
 	}

@@ -278,6 +278,7 @@ func (d *DefaultDialer) DialContext(ctx context.Context, network string, address
 					Domain:    dialMeta.TargetDomain,
 					Outbound:  dialMeta.OutboundTag,
 					LatencyUs: time.Since(start).Microseconds(),
+					ProcessPath: dialMeta.ProcessPath,
 				})
 			} else if err != nil {
 				mc.RecordTCP(monitor.TCPRecord{
@@ -287,6 +288,7 @@ func (d *DefaultDialer) DialContext(ctx context.Context, network string, address
 					Outbound:  dialMeta.OutboundTag,
 					LatencyUs: time.Since(start).Microseconds(),
 					Error:     err.Error(),
+					ProcessPath: dialMeta.ProcessPath,
 				})
 			}
 		}

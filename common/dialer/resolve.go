@@ -133,20 +133,22 @@ func (d *resolveDialer) dialTCP(ctx context.Context, network string, destination
 		if dialMeta != nil && dialMeta.ConnID != "" {
 			if err == nil && conn != nil {
 				mc.RecordTCP(monitor.TCPRecord{
-					Remote:    conn.RemoteAddr().String(),
-					ConnID:    dialMeta.ConnID,
-					Domain:    dialMeta.TargetDomain,
-					Outbound:  dialMeta.OutboundTag,
-					LatencyUs: time.Since(start).Microseconds(),
+					Remote:      conn.RemoteAddr().String(),
+					ConnID:      dialMeta.ConnID,
+					Domain:      dialMeta.TargetDomain,
+					Outbound:    dialMeta.OutboundTag,
+					LatencyUs:   time.Since(start).Microseconds(),
+					ProcessPath: dialMeta.ProcessPath,
 				})
 			} else if err != nil {
 				mc.RecordTCP(monitor.TCPRecord{
-					Remote:    destination.String(),
-					ConnID:    dialMeta.ConnID,
-					Domain:    dialMeta.TargetDomain,
-					Outbound:  dialMeta.OutboundTag,
-					LatencyUs: time.Since(start).Microseconds(),
-					Error:     err.Error(),
+					Remote:      destination.String(),
+					ConnID:      dialMeta.ConnID,
+					Domain:      dialMeta.TargetDomain,
+					Outbound:    dialMeta.OutboundTag,
+					LatencyUs:   time.Since(start).Microseconds(),
+					Error:       err.Error(),
+					ProcessPath: dialMeta.ProcessPath,
 				})
 			}
 		}

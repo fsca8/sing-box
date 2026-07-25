@@ -182,6 +182,7 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 				ServerName: serverName,
 				LatencyUs:  latency,
 				Error:      errStr,
+				ProcessPath: dialMeta.ProcessPath,
 			})
 		}
 	}
