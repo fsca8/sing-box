@@ -3,11 +3,13 @@ package dialer
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -97,18 +99,60 @@ func (d *resolveDialer) DialContext(ctx context.Context, network string, destina
 		return nil, err
 	}
 	if !destination.IsDomain() {
-		return d.dialer.DialContext(ctx, network, destination)
+		return d.dialTCP(ctx, network, destination)
 	}
 	ctx = log.ContextWithOverrideLevel(ctx, log.LevelDebug)
 	addresses, err := d.router.Lookup(ctx, destination.Fqdn, d.queryOptions)
 	if err != nil {
 		return nil, err
 	}
-	if d.parallel {
-		return N.DialParallel(ctx, d.dialer, network, destination, addresses, d.queryOptions.Strategy == C.DomainStrategyPreferIPv6, d.fallbackDelay)
+	return d.dialTCP(ctx, network, destination, addresses...)
+}
+
+// dialTCP performs the actual TCP connect and records monitor metrics.
+// DNS resolution (if any) is already completed before this call.
+func (d *resolveDialer) dialTCP(ctx context.Context, network string, destination M.Socksaddr, addresses ...netip.Addr) (net.Conn, error) {
+	start := time.Now()
+	var (
+		conn net.Conn
+		err  error
+	)
+	if len(addresses) > 0 {
+		if d.parallel {
+			conn, err = N.DialParallel(ctx, d.dialer, network, destination, addresses, d.queryOptions.Strategy == C.DomainStrategyPreferIPv6, d.fallbackDelay)
+		} else {
+			conn, err = N.DialSerial(ctx, d.dialer, network, destination, addresses)
+		}
 	} else {
-		return N.DialSerial(ctx, d.dialer, network, destination, addresses)
+		conn, err = d.dialer.DialContext(ctx, network, destination)
 	}
+
+	if mc := monitor.Get(); mc != nil && !monitor.ShouldSkipMonitor(ctx) {
+		dialMeta := monitor.DialMetaFromContext(ctx)
+		// Only record application connections (with DialMeta), skip DNS/infrastructure connections
+		if dialMeta != nil && dialMeta.ConnID != "" {
+			if err == nil && conn != nil {
+				mc.RecordTCP(monitor.TCPRecord{
+					Remote:    conn.RemoteAddr().String(),
+					ConnID:    dialMeta.ConnID,
+					Domain:    dialMeta.TargetDomain,
+					Outbound:  dialMeta.OutboundTag,
+					LatencyUs: time.Since(start).Microseconds(),
+				})
+			} else if err != nil {
+				mc.RecordTCP(monitor.TCPRecord{
+					Remote:    destination.String(),
+					ConnID:    dialMeta.ConnID,
+					Domain:    dialMeta.TargetDomain,
+					Outbound:  dialMeta.OutboundTag,
+					LatencyUs: time.Since(start).Microseconds(),
+					Error:     err.Error(),
+				})
+			}
+		}
+	}
+
+	return conn, err
 }
 
 func (d *resolveDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {

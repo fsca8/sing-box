@@ -14,6 +14,7 @@ import (
 
 	"github.com/sagernet/sing-box"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -161,12 +162,25 @@ func create(options option.Options) (*box.Box, context.CancelFunc, error) {
 			closeMonitor(startCtx)
 		}
 	}()
+	// Initialize monitor BEFORE service starts so hooks catch startup DNS/TCP/TLS
+	monitorDir := workingDir
+	if monitorDir == "" {
+		monitorDir = "."
+	}
+	monitorDB := filepath.Join(monitorDir, "monitor.db")
+	if _, err := monitor.NewCollector(monitorDB); err != nil {
+		log.Warn("monitor: ", err)
+	} else {
+		log.Info("monitor collector started, db: ", monitorDB)
+	}
+
 	err = instance.Start()
 	finishStart()
 	if err != nil {
 		cancel()
 		return nil, nil, E.Cause(err, "start service")
 	}
+
 	return instance, cancel, nil
 }
 

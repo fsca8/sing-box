@@ -11,6 +11,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/listener"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/control"
@@ -262,6 +263,39 @@ func (d *DefaultDialer) DialContext(ctx context.Context, network string, address
 	} else if address.IsDomain() {
 		return nil, E.New("domain not resolved")
 	}
+
+	start := time.Now()
+	conn, err := d.dialContextInner(ctx, network, address)
+
+	if mc := monitor.Get(); mc != nil && !monitor.ShouldSkipMonitor(ctx) {
+		dialMeta := monitor.DialMetaFromContext(ctx)
+		// Only record application connections (with DialMeta), skip DNS/infrastructure connections
+		if dialMeta != nil && dialMeta.ConnID != "" {
+			if err == nil && conn != nil {
+				mc.RecordTCP(monitor.TCPRecord{
+					Remote:    address.String(),
+					ConnID:    dialMeta.ConnID,
+					Domain:    dialMeta.TargetDomain,
+					Outbound:  dialMeta.OutboundTag,
+					LatencyUs: time.Since(start).Microseconds(),
+				})
+			} else if err != nil {
+				mc.RecordTCP(monitor.TCPRecord{
+					Remote:    address.String(),
+					ConnID:    dialMeta.ConnID,
+					Domain:    dialMeta.TargetDomain,
+					Outbound:  dialMeta.OutboundTag,
+					LatencyUs: time.Since(start).Microseconds(),
+					Error:     err.Error(),
+				})
+			}
+		}
+	}
+
+	return conn, err
+}
+
+func (d *DefaultDialer) dialContextInner(ctx context.Context, network string, address M.Socksaddr) (net.Conn, error) {
 	if d.networkStrategy == nil {
 		return d.trackConn(listener.ListenNetworkNamespace[net.Conn](ctx, d.netns, func() (net.Conn, error) {
 			switch N.NetworkName(network) {

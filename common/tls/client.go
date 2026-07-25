@@ -7,10 +7,12 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sagernet/sing-box/common/badtls"
 	"github.com/sagernet/sing-box/common/tlsspoof"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
@@ -156,7 +158,34 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 	if err != nil {
 		return nil, err
 	}
+	tlsStart := time.Now()
 	tlsConn, err := aTLS.ClientHandshake(ctx, conn, d.config)
+
+	if mc := monitor.Get(); mc != nil && !monitor.ShouldSkipMonitor(ctx) {
+		dialMeta := monitor.DialMetaFromContext(ctx)
+		// Only record application connections (with DialMeta), skip DNS/infrastructure connections
+		if dialMeta != nil && dialMeta.ConnID != "" {
+			serverName := ""
+			if sc, ok := d.config.(interface{ ServerName() string }); ok {
+				serverName = sc.ServerName()
+			}
+			latency := time.Since(tlsStart).Microseconds()
+			errStr := ""
+			if err != nil {
+				errStr = err.Error()
+			}
+			mc.RecordTLS(monitor.TLSRecord{
+				Remote:     conn.RemoteAddr().String(),
+				ConnID:     dialMeta.ConnID,
+				Domain:     dialMeta.TargetDomain,
+				Outbound:   dialMeta.OutboundTag,
+				ServerName: serverName,
+				LatencyUs:  latency,
+				Error:      errStr,
+			})
+		}
+	}
+
 	if err != nil {
 		conn.Close()
 		var echErr *tls.ECHRejectionError

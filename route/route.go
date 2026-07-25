@@ -3,6 +3,7 @@ package route
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/sniff"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/log"
 	R "github.com/sagernet/sing-box/route/rule"
 	"github.com/sagernet/sing-mux"
@@ -163,6 +165,16 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 	for _, buffer := range buffers {
 		conn = bufio.NewCachedConn(conn, buffer)
 	}
+	// Inject monitor metadata BEFORE trackers so ConnID flows to traffic tracking
+	connIDDomain := metadata.Domain
+	if connIDDomain == "" {
+		connIDDomain = metadata.Destination.String()
+	}
+	ctx = monitor.ContextWithDialMeta(ctx, &monitor.DialMeta{
+		ConnID:       fmt.Sprintf("%s-%d", connIDDomain, time.Now().UnixNano()),
+		TargetDomain: metadata.Domain,
+		OutboundTag:  selectedOutbound.Tag(),
+	})
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
 	}
@@ -291,6 +303,16 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 		conn = bufio.NewCachedPacketConn(conn, buffer.Buffer, buffer.Destination)
 		N.PutPacketBuffer(buffer)
 	}
+	// Inject monitor metadata BEFORE trackers so ConnID flows to traffic tracking
+	connIDDomain := metadata.Domain
+	if connIDDomain == "" {
+		connIDDomain = metadata.Destination.String()
+	}
+	ctx = monitor.ContextWithDialMeta(ctx, &monitor.DialMeta{
+		ConnID:       fmt.Sprintf("%s-%d", connIDDomain, time.Now().UnixNano()),
+		TargetDomain: metadata.Domain,
+		OutboundTag:  selectedOutbound.Tag(),
+	})
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedPacketConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
 	}
