@@ -100,7 +100,8 @@ func (d *Database) migrate() error {
 		start_time_ms INTEGER NOT NULL,
 		end_time_ms INTEGER,
 		duration_ms INTEGER,
-		closed INTEGER DEFAULT 0
+		closed INTEGER DEFAULT 0,
+		process_path TEXT DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_conn_conn_id ON connection_records(conn_id);
 	CREATE INDEX IF NOT EXISTS idx_conn_timestamp ON connection_records(start_time_ms);
@@ -126,7 +127,12 @@ func (d *Database) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_traffic_timestamp ON traffic_snapshots(timestamp_ms);
 	`
 	_, err := d.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+	// Add process_path column for existing databases (ignore if already exists)
+	d.db.Exec("ALTER TABLE connection_records ADD COLUMN process_path TEXT DEFAULT ''")
+	return nil
 }
 
 // ---- Async writer (hot-path safe) ----
@@ -242,22 +248,23 @@ func (d *Database) flushBatch(batch []dbEvent) {
 		case "traffic_sync":
 			records := e.Data.(*[]TrafficRecord)
 			upsertTraffic := `INSERT INTO connection_records
-				(conn_id, dest_ip, upload_bytes, download_bytes, outbound, host, domain, start_time_ms)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				(conn_id, dest_ip, upload_bytes, download_bytes, outbound, host, domain, start_time_ms, process_path)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT(conn_id) DO UPDATE SET
 				upload_bytes = excluded.upload_bytes,
 				download_bytes = excluded.download_bytes,
 				outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound),
 				host = COALESCE(NULLIF(excluded.host, ''), connection_records.host),
-				domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain)`
+				domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain),
+				process_path = COALESCE(NULLIF(excluded.process_path, ''), connection_records.process_path)`
 			stmtTraffic, _ := tx.Prepare(upsertTraffic)
 			now := time.Now().UnixMilli()
 			for _, tr := range *records {
 				connID := tr.ConnID
-				if connID == "" {
-					connID = fmt.Sprintf("%s@%d", tr.Host, now)
-				}
-				stmtTraffic.Exec(connID, tr.DestIP, tr.Upload, tr.Download, tr.Outbound, tr.Host, tr.Domain, now)
+					if connID == "" {
+						connID = fmt.Sprintf("%s@%d", tr.Host, now)
+					}
+					stmtTraffic.Exec(connID, tr.DestIP, tr.Upload, tr.Download, tr.Outbound, tr.Host, tr.Domain, now, tr.ProcessPath)
 			}
 			stmtTraffic.Close()
 		}

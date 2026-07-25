@@ -170,10 +170,16 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 	if connIDDomain == "" {
 		connIDDomain = metadata.Destination.String()
 	}
+	// Extract process path for process-level tracking
+	processPath := ""
+	if metadata.ProcessInfo != nil {
+		processPath = metadata.ProcessInfo.ProcessPath
+	}
 	ctx = monitor.ContextWithDialMeta(ctx, &monitor.DialMeta{
 		ConnID:       fmt.Sprintf("%s-%d", connIDDomain, time.Now().UnixNano()),
 		TargetDomain: metadata.Domain,
 		OutboundTag:  selectedOutbound.Tag(),
+		ProcessPath:  processPath,
 	})
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
@@ -308,10 +314,16 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 	if connIDDomain == "" {
 		connIDDomain = metadata.Destination.String()
 	}
+	// Extract process path for process-level tracking
+	processPath := ""
+	if metadata.ProcessInfo != nil {
+		processPath = metadata.ProcessInfo.ProcessPath
+	}
 	ctx = monitor.ContextWithDialMeta(ctx, &monitor.DialMeta{
 		ConnID:       fmt.Sprintf("%s-%d", connIDDomain, time.Now().UnixNano()),
 		TargetDomain: metadata.Domain,
 		OutboundTag:  selectedOutbound.Tag(),
+		ProcessPath:  processPath,
 	})
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedPacketConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
