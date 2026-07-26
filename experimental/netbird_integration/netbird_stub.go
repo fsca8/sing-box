@@ -8,32 +8,26 @@ package netbird_integration
 type Engine struct{}
 
 type Config struct {
-	DeviceName    string
-	SetupKey      string
-	ManagementURL string
-	LogLevel      string
+	DeviceName    string `json:"device_name"`
+	SetupKey      string `json:"setup_key"`
+	JWTToken      string `json:"jwt_token"`
+	ManagementURL string `json:"management_url"`
+	AdminURL      string `json:"admin_url"`
+	LogLevel      string `json:"log_level"`
 }
 
 type Status struct {
-	Running bool
+	Running bool `json:"running"`
 }
 
-func NewEngine(cfg *Config) *Engine {
-	return &Engine{}
+// UnifiedConfig stub holds the netbird config section only.
+type UnifiedConfig struct {
+	Netbird *Config `json:"netbird"`
 }
 
-func (e *Engine) Start() error {
-	return nil
-}
-
-func (e *Engine) Stop() error {
-	return nil
-}
-
-func (e *Engine) IsRunning() bool {
-	return false
-}
-
-func (e *Engine) GetStatus() *Status {
-	return &Status{Running: false}
-}
+func NewEngine(cfg *Config) *Engine               { return &Engine{} }
+func (e *Engine) Start() error                     { return nil }
+func (e *Engine) Stop() error                      { return nil }
+func (e *Engine) IsRunning() bool                   { return false }
+func (e *Engine) GetStatus() *Status                { return &Status{Running: false} }
+func ReadUnifiedConfig(path string) (*UnifiedConfig, error) { return nil, nil }
