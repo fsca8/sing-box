@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/experimental/netbird_integration"
+	"github.com/sagernet/sing/common/json"
 
 	"github.com/spf13/cobra"
 )
@@ -62,14 +63,14 @@ func runNetbird() {
 
 	if netbirdConfigPath != "" {
 		log.Info("reading config from: ", netbirdConfigPath)
-		unified, err := netbird_integration.ReadUnifiedConfig(netbirdConfigPath)
+		data, err := os.ReadFile(netbirdConfigPath)
 		if err != nil {
 			log.Fatal("read config: ", err)
 		}
-		if unified.Netbird == nil {
-			log.Fatal("config file has no 'netbird' section")
+		cfg = &netbird_integration.Config{}
+		if err := json.Unmarshal(data, cfg); err != nil {
+			log.Fatal("parse config: ", err)
 		}
-		cfg = unified.Netbird
 		log.Info("netbird config loaded: device=", cfg.DeviceName, " mgmt=", cfg.ManagementURL)
 	} else {
 		// Fallback: build config from env vars
