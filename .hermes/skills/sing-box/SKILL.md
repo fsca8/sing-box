@@ -175,7 +175,29 @@ See `references/debug-timing.md` for the older manual printf approach. For a per
 
 Connection context (domain, outbound tag, unique connID) flows via `monitor.DialMeta` stored in `context.Context`, injected at `route/route.go:routeConnection()`. The connID links the TCP hook, TLS hook, and Clash API `traffic_sync` to the same SQLite row.
 
-**BUILD DISCIPLINE: Never `go clean -cache`.** On this machine it causes 80-90% CPU and 5+ minute rebuilds. Never initiate builds without explicit user approval ("编译太慢，无明确指令绝对不能编译"). CGO requires `export PATH="/c/msys64/mingw64/bin:$PATH"` on Windows.
+## Building
+
+Always use `dev.sh` from project root — it injects the correct version string (commit hash + build date) and required build tags (`with_utls,with_gvisor,with_clash_api`).
+
+```bash
+cd ~/works/sing-box
+
+# Debug build (default, no stripping)
+./dev.sh
+
+# Release build (stripped, smaller binary)
+./dev.sh release
+
+# Custom tags
+TAGS="with_utls,with_gvisor,with_clash_api,with_quic" ./dev.sh release
+```
+
+Output: `sing-box-<VERSION>.exe`
+
+**BUILD DISCIPLINE:**
+- Never `go clean -cache` — causes 80-90% CPU and 5+ minute rebuilds
+- Never build without explicit user approval ("编译太慢，无明确指令绝对不能编译")
+- CGO is required on Windows: `export PATH="/c/msys64/mingw64/bin:$PATH"`
 
 ## Protocol Debugging: Swap to VMess
 
