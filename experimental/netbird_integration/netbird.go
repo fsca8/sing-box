@@ -4,6 +4,7 @@ package netbird_integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 // Engine wraps the netbird embed client.
 type Engine struct {
+	cfg     *Config
 	mu      sync.Mutex
 	running bool
 	client  *nbembed.Client
@@ -23,23 +25,44 @@ type Engine struct {
 
 // Config holds configuration for the netbird engine.
 type Config struct {
-	DeviceName    string
-	SetupKey      string
-	ManagementURL string
-	LogLevel      string
+	DeviceName    string `json:"device_name"`
+	SetupKey      string `json:"setup_key"`
+	JWTToken      string `json:"jwt_token"`
+	ManagementURL string `json:"management_url"`
+	AdminURL      string `json:"admin_url"`
+	LogLevel      string `json:"log_level"`
 }
 
 // Status represents engine status.
 type Status struct {
-	Running bool
+	Running bool `json:"running"`
 }
 
-// NewEngine creates a new netbird engine wrapper.
+// UnifiedConfig is the top-level config that wraps both engines.
+type UnifiedConfig struct {
+	Netbird *Config `json:"netbird"`
+	// SingBox is left unstructured — sing-box parses its own section.
+	SingBox json.RawMessage `json:"sing_box"`
+}
+
+// NewEngine creates a new netbird engine wrapper with the given config.
 func NewEngine(cfg *Config) *Engine {
-	return &Engine{}
+	if cfg == nil {
+		cfg = &Config{}
+	}
+	if cfg.DeviceName == "" {
+		cfg.DeviceName = "sing-netbird"
+	}
+	if cfg.ManagementURL == "" {
+		cfg.ManagementURL = "https://api.netbird.io:443"
+	}
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = "info"
+	}
+	return &Engine{cfg: cfg}
 }
 
-// Start starts the netbird engine.
+// Start starts the netbird engine using the config from NewEngine.
 func (e *Engine) Start() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -48,11 +71,25 @@ func (e *Engine) Start() error {
 		return fmt.Errorf("netbird engine already running")
 	}
 
+	// Fall back to env vars for credentials if not in config
+	setupKey := e.cfg.SetupKey
+	jwtToken := e.cfg.JWTToken
+	if setupKey == "" {
+		setupKey = os.Getenv("NB_SETUP_KEY")
+	}
+	if jwtToken == "" {
+		jwtToken = os.Getenv("NB_JWT_TOKEN")
+	}
+	if setupKey == "" && jwtToken == "" {
+		log.Warn("netbird: no SetupKey or JWTToken set, engine may not authenticate")
+	}
+
 	opts := nbembed.Options{
-		DeviceName:    envOrDefault("NB_DEVICE_NAME", "sing-netbird"),
-		SetupKey:      envOrDefault("NB_SETUP_KEY", ""),
-		ManagementURL: envOrDefault("NB_MANAGEMENT_URL", "https://api.netbird.io:443"),
-		LogLevel:      envOrDefault("NB_LOG_LEVEL", "info"),
+		DeviceName:    e.cfg.DeviceName,
+		SetupKey:      setupKey,
+		JWTToken:      jwtToken,
+		ManagementURL: e.cfg.ManagementURL,
+		LogLevel:      e.cfg.LogLevel,
 	}
 
 	client, err := nbembed.New(opts)
@@ -111,9 +148,15 @@ func (e *Engine) GetStatus() *Status {
 	return &Status{Running: e.running}
 }
 
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+// ReadUnifiedConfig reads a unified JSON config file and returns the parsed structure.
+func ReadUnifiedConfig(path string) (*UnifiedConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
 	}
-	return def
+	var cfg UnifiedConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	return &cfg, nil
 }

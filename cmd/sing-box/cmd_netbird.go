@@ -14,9 +14,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	netbirdConfigPath string
+)
+
 var commandNetbirdRun = &cobra.Command{
 	Use:   "netbird-run",
-	Short: "Run netbird engine (embedded, requires NB_SETUP_KEY or NB_JWT_TOKEN)",
+	Short: "Run netbird engine (embedded)",
+	Long: `Start the netbird engine as an embedded client.
+
+Requires a unified config file (-c) with a "netbird" section:
+  {
+    "netbird": {
+      "device_name":    "my-device",
+      "setup_key":      "your-setup-key",
+      "management_url": "https://api.netbird.io:443",
+      "log_level":      "info"
+    }
+  }
+
+Credentials can also be set via NB_SETUP_KEY or NB_JWT_TOKEN env vars.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		runNetbird()
 	},
@@ -38,20 +55,37 @@ var commandNetbirdStatus = &cobra.Command{
 var nbEngine *netbird_integration.Engine
 
 func init() {
+	commandNetbirdRun.PersistentFlags().StringVarP(&netbirdConfigPath, "config", "c", "", "path to unified config file (JSON)")
 	mainCommand.AddCommand(commandNetbirdRun)
 	mainCommand.AddCommand(commandNetbirdStatus)
 }
 
 func runNetbird() {
-	if os.Getenv("NB_SETUP_KEY") == "" && os.Getenv("NB_JWT_TOKEN") == "" {
-		log.Warn("NB_SETUP_KEY or NB_JWT_TOKEN not set, netbird may not authenticate")
-	}
+	var cfg *netbird_integration.Config
 
-	cfg := &netbird_integration.Config{
-		DeviceName:    envOrDefault("NB_DEVICE_NAME", "sing-netbird"),
-		SetupKey:      os.Getenv("NB_SETUP_KEY"),
-		ManagementURL: envOrDefault("NB_MANAGEMENT_URL", "https://api.netbird.io:443"),
-		LogLevel:      envOrDefault("NB_LOG_LEVEL", "info"),
+	if netbirdConfigPath != "" {
+		log.Info("reading config from: ", netbirdConfigPath)
+		unified, err := netbird_integration.ReadUnifiedConfig(netbirdConfigPath)
+		if err != nil {
+			log.Fatal("read config: ", err)
+		}
+		if unified.Netbird == nil {
+			log.Fatal("config file has no 'netbird' section")
+		}
+		cfg = unified.Netbird
+		log.Info("netbird config loaded: device=", cfg.DeviceName, " mgmt=", cfg.ManagementURL)
+	} else {
+		// Fallback: build config from env vars
+		if os.Getenv("NB_SETUP_KEY") == "" && os.Getenv("NB_JWT_TOKEN") == "" {
+			log.Warn("no config file (-c) and NB_SETUP_KEY/NB_JWT_TOKEN not set")
+		}
+		cfg = &netbird_integration.Config{
+			DeviceName:    envOrDefault("NB_DEVICE_NAME", "sing-netbird"),
+			SetupKey:      os.Getenv("NB_SETUP_KEY"),
+			JWTToken:      os.Getenv("NB_JWT_TOKEN"),
+			ManagementURL: envOrDefault("NB_MANAGEMENT_URL", "https://api.netbird.io:443"),
+			LogLevel:      envOrDefault("NB_LOG_LEVEL", "info"),
+		}
 	}
 
 	engine := netbird_integration.NewEngine(cfg)
