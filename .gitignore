@@ -19,12 +19,8 @@
 /config.d/
 /venv/
 CLAUDE.md
-AGENTS.md
 /.claude/
 
 # Build artifacts
 /*.dll
 /sing-box-*.exe
-
-# Project-local Hermes config
-/.hermes/

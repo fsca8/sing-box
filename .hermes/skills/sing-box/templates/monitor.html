@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sing-box Monitor</title>
+<style>
+:root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e;
+        --green:#3fb950; --blue:#58a6ff; --red:#f85149; --yellow:#d29922; --purple:#bc8cff; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font:14px/1.5 system-ui,sans-serif; padding:16px; }
+h1 { font-size:20px; margin-bottom:16px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px; }
+.card h3 { font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; }
+.stat { font-size:28px; font-weight:700; }
+.summary { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:12px; }
+.bar-wrap { height:8px; background:var(--border); border-radius:4px; margin-top:8px; overflow:hidden; }
+.bar { height:100%; border-radius:4px; transition:width .3s; }
+.bar.up { background:var(--green); } .bar.down { background:var(--blue); }
+table { width:100%; font-size:12px; border-collapse:collapse; }
+th { text-align:left; color:var(--muted); font-weight:500; padding:4px 8px; border-bottom:1px solid var(--border); }
+td { padding:4px 8px; border-bottom:1px solid var(--border); white-space:nowrap; }
+.tag { display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px; font-weight:600; }
+.tag.proxy { background:var(--purple); color:#fff; } .tag.direct { background:var(--green); color:#000; }
+.pie { display:flex; align-items:center; gap:12px; margin-top:8px; }
+.pie canvas { width:80px; height:80px; }
+.legend { font-size:12px; } .legend-item { display:flex; align-items:center; gap:6px; margin:3px 0; }
+.legend-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.dns-box { margin-top:8px; }
+.dns-box input { width:200px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:4px 8px; border-radius:4px; font-size:13px; }
+.dns-box button { background:var(--blue); color:#000; border:none; padding:4px 12px; border-radius:4px; cursor:pointer; font-size:13px; margin-left:6px; }
+.dns-result { margin-top:8px; font-size:12px; font-family:monospace; }
+.latency { font-size:22px; font-weight:700; }
+.latency-ok { color:var(--green); } .latency-warn { color:var(--yellow); } .latency-bad { color:var(--red); }
+.refresh { font-size:11px; color:var(--muted); float:right; }
+</style>
+</head>
+<body>
+<h1>sing-box Monitor <span style="font-size:11px;color:var(--muted);float:right" id="refresh-time"></span></h1>
+
+<div class="summary">
+  <div class="card"><h3>Download</h3><div class="stat" id="dl">-</div><div class="bar-wrap"><div class="bar down" id="dl-bar" style="width:0"></div></div></div>
+  <div class="card"><h3>Upload</h3><div class="stat" id="ul">-</div><div class="bar-wrap"><div class="bar up" id="ul-bar" style="width:0"></div></div></div>
+  <div class="card"><h3>Connections</h3><div class="stat" id="conn-count">-</div></div>
+  <div class="card"><h3>Memory</h3><div class="stat" id="mem">-</div></div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Proxy Latency</h3>
+    <div class="latency" id="latency">-</div>
+    <canvas id="latency-chart"></canvas>
+  </div>
+  <div class="card">
+    <h3>Route Distribution</h3>
+    <div class="pie"><canvas id="pie-chart"></canvas><div class="legend" id="pie-legend"></div></div>
+  </div>
+  <div class="card">
+    <h3>DNS Test</h3>
+    <div class="dns-box">
+      <input id="dns-input" value="baidu.com"><button onclick="testDNS()">Query</button>
+    </div>
+    <div class="dns-result" id="dns-result"></div>
+  </div>
+  <div class="card">
+    <h3>Active Connections</h3>
+    <div style="max-height:300px;overflow-y:auto;">
+      <table><thead><tr><th>Host</th><th>Port</th><th>Route</th><th>Up</th><th>Down</th><th>Age</th></tr></thead><tbody id="conn-body"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+const API='http://127.0.0.1:9090';let dlMax=1,ulMax=1,latHistory=[];
+
+function fB(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(2)+' GB'}
+function fT(t){const s=Math.floor((Date.now()-new Date(t).getTime())/1000);if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';return Math.floor(s/3600)+'h'}
+function utag(r){if(!r)return['final','proxy'];if(r.includes('direct'))return['Direct','direct'];if(r.includes('proxy'))return['Proxy','proxy'];if(r.includes('block'))return['Block','block'];return['Other','proxy']}
+
+async function fa(p){try{const r=await fetch(API+p);return r.json()}catch(e){return null}}
+
+function drawPie(d){
+  const c=document.getElementById('pie-chart'),ctx=c.getContext('2d');
+  c.width=80;c.height=80;
+  const t=Object.values(d).reduce((a,b)=>a+b,0)||1;
+  const cols={proxy:'#bc8cff',direct:'#3fb950',block:'#f85149'};
+  let a=0;
+  for(const[k,v]of Object.entries(d)){
+    ctx.fillStyle=cols[k]||'#8b949e';ctx.beginPath();ctx.moveTo(40,40);
+    ctx.arc(40,40,38,a,a+(v/t)*Math.PI*2);ctx.fill();a+=(v/t)*Math.PI*2;
+  }
+  document.getElementById('pie-legend').innerHTML=Object.entries(d)
+    .map(([k,v])=>`<div class="legend-item"><span class="legend-dot" style="background:${cols[k]}"></span>${k}: ${v}</div>`).join('');
+}
+
+function drawLat(){
+  const c=document.getElementById('latency-chart'),ctx=c.getContext('2d');
+  c.width=c.parentElement.clientWidth-28;c.height=80;
+  if(latHistory.length<2)return;
+  ctx.strokeStyle='#58a6ff';ctx.lineWidth=1.5;ctx.beginPath();
+  const m=Math.max(...latHistory,100);
+  latHistory.forEach((v,i)=>{
+    const x=(i/(latHistory.length-1))*c.width,y=70-(v/m)*60;
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+}
+
+async function refresh(){
+  const[conns,traffic,mem]=await Promise.all([fa('/connections'),fa('/traffic'),fa('/memory')]);
+  if(traffic){
+    dlMax=Math.max(dlMax,traffic.down);ulMax=Math.max(ulMax,traffic.up);
+    document.getElementById('dl').textContent=fB(traffic.down);
+    document.getElementById('ul').textContent=fB(traffic.up);
+    document.getElementById('dl-bar').style.width=(traffic.down/dlMax*100)+'%';
+    document.getElementById('ul-bar').style.width=(traffic.up/ulMax*100)+'%';
+  }
+  if(mem)document.getElementById('mem').textContent=(mem/1048576).toFixed(0)+' MB';
+  if(conns){
+    document.getElementById('conn-count').textContent=conns.connections.length;
+    const d={proxy:0,direct:0,block:0};
+    document.getElementById('conn-body').innerHTML=conns.connections.map(c=>{
+      const[l,t]=utag(c.rule);d[t]++;
+      const h=c.metadata.host||c.metadata.destinationIP;
+      return`<tr><td title="${h}">${h.substring(0,30)}</td><td>${c.metadata.destinationPort}</td><td><span class="tag ${t}">${l}</span></td><td style="color:var(--green)">${fB(c.upload)}</td><td style="color:var(--blue)">${fB(c.download)}</td><td>${fT(c.start)}</td></tr>`;
+    }).join('');
+    drawPie(d);
+  }
+  try{
+    const r=await fetch(API+'/proxies/proxy/delay?timeout=5000&url=https://www.gstatic.com/generate_204');
+    const d=await r.json();
+    if(d&&d.delay){
+      latHistory.push(d.delay);if(latHistory.length>60)latHistory.shift();
+      const e=document.getElementById('latency');
+      e.textContent=d.delay+'ms';
+      e.className='latency '+(d.delay<500?'latency-ok':d.delay<1000?'latency-warn':'latency-bad');
+      drawLat();
+    }
+  }catch(e){}
+  document.getElementById('refresh-time').textContent=new Date().toLocaleTimeString();
+}
+
+async function testDNS(){
+  const n=document.getElementById('dns-input').value.trim();
+  if(!n)return;
+  const e=document.getElementById('dns-result');e.textContent='...';
+  try{
+    const r=await fetch(API+'/dns/query?name='+encodeURIComponent(n)+'&type=A');
+    const d=await r.json();
+    if(d.Answer)e.innerHTML=d.Answer.map(a=>`<div>${a.name} → <b>${a.data}</b> <span style="color:var(--muted)">TTL:${a.TTL}s</span></div>`).join('');
+    else e.textContent=d.error||JSON.stringify(d);
+  }catch(x){e.textContent='Failed: '+x.message;}
+}
+
+refresh();testDNS();setInterval(refresh,3000);
+</script>
+</body>
+</html>
