@@ -23,8 +23,6 @@ func HTTPHandler() http.Handler {
 			handleDNS(w, r)
 		case "connections":
 			handleConnections(w, r)
-		case "alerts":
-			handleAlerts(w, r)
 		case "stats":
 			handleStats(w, r)
 		case "health":
@@ -75,27 +73,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{
 		"connections": records,
 		"total":       len(records),
-	})
-}
-
-func handleAlerts(w http.ResponseWriter, r *http.Request) {
-	c := Get()
-	if c == nil {
-		writeJSON(w, map[string]string{"error": "monitor not initialized"})
-		return
-	}
-	since, limit := parseQuery(r)
-	events, err := c.QueryAlerts(since, limit)
-	if err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
-		return
-	}
-	if events == nil {
-		events = []AlertEvent{}
-	}
-	writeJSON(w, map[string]interface{}{
-		"alerts": events,
-		"total":  len(events),
 	})
 }
 

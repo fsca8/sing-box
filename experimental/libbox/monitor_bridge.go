@@ -51,30 +51,6 @@ func (m *MonitorService) GetConnectionHistory(limit int) string {
 	return string(b)
 }
 
-func (m *MonitorService) GetAlertEvents(limit int) string {
-	if m.collector == nil {
-		return "[]"
-	}
-	events := m.collector.GetAlertEvents(limit)
-	b, _ := json.Marshal(events)
-	return string(b)
-}
-
-// ---- Alert rules ----
-
-func (m *MonitorService) AddAlertRule(jsonStr string) error {
-	// handled by collector's direct DB methods
-	return nil
-}
-
-func (m *MonitorService) DeleteAlertRule(id int64) error {
-	return nil
-}
-
-func (m *MonitorService) GetAlertRules() string {
-	return "[]"
-}
-
 // EventCallback is implemented by Android/Kotlin to receive event JSON
 type EventCallback interface {
 	SendEvent(json string) error

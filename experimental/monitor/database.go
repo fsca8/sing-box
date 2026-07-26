@@ -14,8 +14,8 @@ import (
 
 // dbEvent is a write event sent to the async batch writer.
 type dbEvent struct {
-	Kind string      // "dns", "connection", "connection_closed", "alert"
-	Data interface{} // *DNSRecord, *ConnectionRecord, *AlertEvent
+	Kind string      // "dns", "connection", "connection_closed"
+	Data interface{} // *DNSRecord, *ConnectionRecord
 }
 
 // Database wraps SQLite with async batch writing.
@@ -49,6 +49,11 @@ func NewDatabase(path string) (*Database, error) {
 	if err := d.migrate(); err != nil {
 		db.Close()
 		return nil, err
+	}
+
+	// Clean up data older than 7 days on startup
+	if err := d.Cleanup(7, 7); err != nil {
+		fmt.Printf("[monitor] cleanup failed: %v\n", err)
 	}
 
 	// Ensure UNIQUE index for per-connection upsert — key is conn_id
@@ -100,26 +105,6 @@ func (d *Database) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_conn_conn_id ON connection_records(conn_id);
 	CREATE INDEX IF NOT EXISTS idx_conn_timestamp ON connection_records(start_time_ms);
-
-	CREATE TABLE IF NOT EXISTS alert_events (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		timestamp_ms INTEGER NOT NULL,
-		rule_id INTEGER DEFAULT 0,
-		rule_name TEXT DEFAULT '',
-		connection_id TEXT,
-		actual_value INTEGER DEFAULT 0,
-		threshold INTEGER DEFAULT 0,
-		message TEXT DEFAULT ''
-	);
-	CREATE INDEX IF NOT EXISTS idx_alert_timestamp ON alert_events(timestamp_ms);
-
-	CREATE TABLE IF NOT EXISTS traffic_snapshots (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		timestamp_ms INTEGER NOT NULL,
-		upload_bytes INTEGER NOT NULL DEFAULT 0,
-		download_bytes INTEGER NOT NULL DEFAULT 0
-	);
-	CREATE INDEX IF NOT EXISTS idx_traffic_timestamp ON traffic_snapshots(timestamp_ms);
 	`
 	_, err := d.db.Exec(schema)
 	if err != nil {
@@ -176,7 +161,6 @@ func (d *Database) flushBatch(batch []dbEvent) {
 	insertConn := `INSERT INTO connection_records (conn_id, host, domain, dest_ip, dest_port, rule, outbound, tcp_latency_us, tls_latency_us, dns_latency_us, tls_version, tls_cipher, upload_bytes, download_bytes, start_time_ms, end_time_ms, duration_ms, closed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	updateConnClosed := `UPDATE connection_records SET end_time_ms=?, duration_ms=?, upload_bytes=?, download_bytes=?, closed=1 WHERE conn_id=?`
 	updateConnClosedByDest := `UPDATE connection_records SET end_time_ms=?, duration_ms=?, closed=1 WHERE dest_ip=?`
-	insertAlert := `INSERT INTO alert_events (timestamp_ms, rule_id, rule_name, connection_id, actual_value, threshold, message) VALUES (?,?,?,?,?,?,?)`
 	updateConnMeta := `UPDATE connection_records SET host = COALESCE(NULLIF(?, ''), host), outbound = COALESCE(NULLIF(?, ''), outbound) WHERE conn_id = ?`
 	upsertConnLat := `INSERT INTO connection_records (conn_id, dest_ip, domain, outbound, tcp_latency_us, tls_latency_us, start_time_ms, process_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(conn_id) DO UPDATE SET dest_ip = COALESCE(NULLIF(excluded.dest_ip, ''), connection_records.dest_ip), tcp_latency_us = MAX(connection_records.tcp_latency_us, excluded.tcp_latency_us), tls_latency_us = MAX(connection_records.tls_latency_us, excluded.tls_latency_us), domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain), outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound), process_path = COALESCE(NULLIF(excluded.process_path, ''), connection_records.process_path)`
 
@@ -184,7 +168,6 @@ func (d *Database) flushBatch(batch []dbEvent) {
 	stmtConn, _ := tx.Prepare(insertConn)
 	stmtClosed, _ := tx.Prepare(updateConnClosed)
 	stmtClosedDst, _ := tx.Prepare(updateConnClosedByDest)
-	stmtAlert, _ := tx.Prepare(insertAlert)
 	stmtMeta, _ := tx.Prepare(updateConnMeta)
 	stmtLat, _ := tx.Prepare(upsertConnLat)
 	defer func() {
@@ -199,9 +182,6 @@ func (d *Database) flushBatch(batch []dbEvent) {
 		}
 		if stmtClosedDst != nil {
 			stmtClosedDst.Close()
-		}
-		if stmtAlert != nil {
-			stmtAlert.Close()
 		}
 		if stmtMeta != nil {
 			stmtMeta.Close()
@@ -238,9 +218,6 @@ func (d *Database) flushBatch(batch []dbEvent) {
 			r := e.Data.(map[string]interface{})
 			pp, _ := r["process_path"].(string)
 			stmtLat.Exec(r["conn_id"], r["dest_ip"], r["domain"], r["outbound"], r["tcp"], r["tls"], r["start_time"], pp)
-		case "alert":
-			r := e.Data.(*AlertEvent)
-			stmtAlert.Exec(r.Timestamp, r.RuleID, r.RuleName, r.ConnectionID, r.ActualValue, r.Threshold, r.Message)
 		case "traffic_sync":
 			records := e.Data.(*[]TrafficRecord)
 			upsertTraffic := `INSERT INTO connection_records
@@ -341,14 +318,6 @@ func (d *Database) WriteLatency(connID, destIP, domain, outbound string, tcpLate
 	}
 }
 
-func (d *Database) WriteAlert(r *AlertEvent) {
-	select {
-	case d.writeCh <- dbEvent{Kind: "alert", Data: r}:
-	default:
-		d.dropped.Add(1)
-	}
-}
-
 // DroppedRecords returns the count of events dropped due to full buffer.
 func (d *Database) DroppedRecords() int64 {
 	return d.dropped.Load()
@@ -438,27 +407,6 @@ func (d *Database) QueryConnections(since int64, limit int) ([]ConnectionRecord,
 	return records, nil
 }
 
-func (d *Database) QueryAlerts(since int64, limit int) ([]AlertEvent, error) {
-	rows, err := d.db.Query(
-		"SELECT timestamp_ms, rule_id, rule_name, connection_id, actual_value, threshold, message FROM alert_events WHERE timestamp_ms > ? ORDER BY timestamp_ms DESC LIMIT ?",
-		since, limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var events []AlertEvent
-	for rows.Next() {
-		var e AlertEvent
-		if err := rows.Scan(&e.Timestamp, &e.RuleID, &e.RuleName, &e.ConnectionID, &e.ActualValue, &e.Threshold, &e.Message); err != nil {
-			continue
-		}
-		events = append(events, e)
-	}
-	return events, nil
-}
-
 func (d *Database) QueryStats() (uploadTotal, downloadTotal int64, err error) {
 	err = d.db.QueryRow(
 		"SELECT COALESCE(SUM(upload_bytes), 0), COALESCE(SUM(download_bytes), 0) FROM connection_records WHERE closed = 1",
@@ -466,22 +414,17 @@ func (d *Database) QueryStats() (uploadTotal, downloadTotal int64, err error) {
 	return
 }
 
-// Cleanup deletes records older than the given thresholds.
-func (d *Database) Cleanup(dnsDays, connDays, alertDays int) error {
+// Cleanup deletes records older than the given number of days.
+func (d *Database) Cleanup(dnsDays, connDays int) error {
 	now := time.Now().UnixMilli()
 	dnsCutoff := now - int64(dnsDays)*86400000
 	connCutoff := now - int64(connDays)*86400000
-	alertCutoff := now - int64(alertDays)*86400000
 
 	_, err := d.db.Exec("DELETE FROM dns_records WHERE timestamp_ms < ?", dnsCutoff)
 	if err != nil {
 		return err
 	}
-	_, err = d.db.Exec("DELETE FROM connection_records WHERE start_time_ms < ? AND closed = 1", connCutoff)
-	if err != nil {
-		return err
-	}
-	_, err = d.db.Exec("DELETE FROM alert_events WHERE timestamp_ms < ?", alertCutoff)
+	_, err = d.db.Exec("DELETE FROM connection_records WHERE start_time_ms < ?", connCutoff)
 	return err
 }
 
