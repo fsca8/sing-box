@@ -66,26 +66,6 @@ type ConnectionRecord struct {
 	ProcessPath   string `json:"process_path,omitempty"`
 }
 
-type AlertRule struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	Metric        string `json:"metric"`
-	Operator      string `json:"operator"` // gt, lt, eq
-	ThresholdUs   int64  `json:"threshold_us"`
-	TargetPattern string `json:"target_pattern,omitempty"`
-	Enabled       bool   `json:"enabled"`
-}
-
-type AlertEvent struct {
-	RuleID       int64  `json:"rule_id"`
-	RuleName     string `json:"rule_name"`
-	ConnectionID string `json:"connection_id,omitempty"`
-	ActualValue  int64  `json:"actual_value"`
-	Threshold    int64  `json:"threshold"`
-	Message      string `json:"message"`
-	Timestamp    int64  `json:"timestamp"`
-}
-
 // Event is the unified JSON event sent to Flutter
 type Event struct {
 	Type      string `json:"type"`
@@ -93,7 +73,6 @@ type Event struct {
 	// Only one of these is set, depending on Type
 	DNS        *DNSRecord        `json:"dns,omitempty"`
 	Connection *ConnectionRecord `json:"connection,omitempty"`
-	Alert      *AlertEvent       `json:"alert,omitempty"`
 	Status     string            `json:"status,omitempty"`
 	Message    string            `json:"message,omitempty"`
 }

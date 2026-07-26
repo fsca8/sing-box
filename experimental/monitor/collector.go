@@ -9,15 +9,12 @@ import (
 )
 
 type Collector struct {
-	mu       sync.RWMutex
-	dnsBuf   *RingBuffer[DNSRecord]
-	connBuf  *RingBuffer[ConnectionRecord]
-	alertBuf *RingBuffer[AlertEvent]
-	rules    []AlertRule
-	store    *fileStore
-	db       *Database
-	connMap  map[string]*ConnectionRecord // remote addr → pending connection
-	eventCB  func(string)                 // callback to push JSON to Android
+	mu      sync.RWMutex
+	dnsBuf  *RingBuffer[DNSRecord]
+	connBuf *RingBuffer[ConnectionRecord]
+	db      *Database
+	connMap map[string]*ConnectionRecord // remote addr → pending connection
+	eventCB func(string)                 // callback to push JSON to Android
 }
 
 var globalCollector *Collector
@@ -32,14 +29,11 @@ func NewCollector(dbPath string) (*Collector, error) {
 	}
 
 	c := &Collector{
-		dnsBuf:   NewRingBuffer[DNSRecord](500),
-		connBuf:  NewRingBuffer[ConnectionRecord](200),
-		alertBuf: NewRingBuffer[AlertEvent](100),
-		store:    newFileStore(dbPath),
-		db:       db,
-		connMap:  make(map[string]*ConnectionRecord),
+		dnsBuf:  NewRingBuffer[DNSRecord](500),
+		connBuf: NewRingBuffer[ConnectionRecord](200),
+		db:      db,
+		connMap: make(map[string]*ConnectionRecord),
 	}
-	c.loadAlertRules()
 	globalCollector = c
 	return c, nil
 }
@@ -309,99 +303,6 @@ func (c *Collector) CloseConnByDest(destKey string) {
 	}
 }
 
-// ---- Alerts ----
-
-func (c *Collector) EvaluateAlerts(conn ConnectionRecord) {
-	c.mu.RLock()
-	rules := make([]AlertRule, len(c.rules))
-	copy(rules, c.rules)
-	c.mu.RUnlock()
-
-	for _, rule := range rules {
-		if !rule.Enabled {
-			continue
-		}
-		var value int64
-		switch rule.Metric {
-		case "dns_latency":
-			if conn.DNSLatencyUs != nil {
-				value = *conn.DNSLatencyUs
-			}
-		case "tcp_latency":
-			value = conn.TCPLatencyUs
-		case "tls_latency":
-			value = conn.TLSLatencyUs
-		case "total_latency":
-			value = conn.TCPLatencyUs + conn.TLSLatencyUs
-		default:
-			continue
-		}
-		if value == 0 {
-			continue
-		}
-
-		triggered := false
-		switch rule.Operator {
-		case "gt":
-			triggered = value > rule.ThresholdUs
-		case "lt":
-			triggered = value < rule.ThresholdUs
-		case "eq":
-			triggered = value == rule.ThresholdUs
-		}
-		if !triggered {
-			continue
-		}
-
-		alert := AlertEvent{
-			RuleID:       rule.ID,
-			RuleName:     rule.Name,
-			ConnectionID: conn.ID,
-			ActualValue:  value,
-			Threshold:    rule.ThresholdUs,
-			Message:      rule.Name + ": " + conn.Host + " " + rule.Metric + "=" + formatUs(value) + " > " + formatUs(rule.ThresholdUs),
-			Timestamp:    nowMs(),
-		}
-		c.mu.Lock()
-		c.alertBuf.Push(alert)
-		c.mu.Unlock()
-
-		// Async SQLite write
-		if c.db != nil {
-			c.db.WriteAlert(&alert)
-		}
-
-		ev := Event{Type: "alert", Timestamp: alert.Timestamp, Alert: &alert}
-		c.pushJSON(ev)
-	}
-}
-
-func formatUs(us int64) string {
-	if us < 1000 {
-		return itoa(us) + "us"
-	}
-	return itoa(us/1000) + "ms"
-}
-
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	s := ""
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		s = string(rune('0'+n%10)) + s
-		n /= 10
-	}
-	if neg {
-		s = "-" + s
-	}
-	return s
-}
-
 // ---- Query methods ----
 
 func (c *Collector) GetDNSHistory(limit int) []DNSRecord {
@@ -410,10 +311,6 @@ func (c *Collector) GetDNSHistory(limit int) []DNSRecord {
 
 func (c *Collector) GetConnectionHistory(limit int) []ConnectionRecord {
 	return c.connBuf.Last(limit)
-}
-
-func (c *Collector) GetAlertEvents(limit int) []AlertEvent {
-	return c.alertBuf.Last(limit)
 }
 
 // ---- SQLite-backed history queries (for HTTP API) ----
@@ -430,13 +327,6 @@ func (c *Collector) QueryConnections(since int64, limit int) ([]ConnectionRecord
 		return nil, nil
 	}
 	return c.db.QueryConnections(since, limit)
-}
-
-func (c *Collector) QueryAlerts(since int64, limit int) ([]AlertEvent, error) {
-	if c.db == nil {
-		return nil, nil
-	}
-	return c.db.QueryAlerts(since, limit)
 }
 
 func (c *Collector) QueryStats() (int64, int64, error) {
