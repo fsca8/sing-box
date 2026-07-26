@@ -43,8 +43,7 @@
   },
   "netbird": {
     "device_name": "sing-netbird-windows",
-    "setup_key": "",
-    "management_url": "https://api.netbird.io:443",
+    "setup_key": "B28C0AA0-897D-45CC-8813-EE235CF3EFD5",
+    "management_url": "https://netbird.wangzhongwang.wang",
     "log_level": "info"
   }
-}

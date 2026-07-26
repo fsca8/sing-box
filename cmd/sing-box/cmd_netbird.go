@@ -23,17 +23,14 @@ var commandNetbirdRun = &cobra.Command{
 	Short: "Run netbird engine (embedded)",
 	Long: `Start the netbird engine as an embedded client.
 
-Requires a unified config file (-c) with a "netbird" section:
-  {
-    "netbird": {
-      "device_name":    "my-device",
-      "setup_key":      "your-setup-key",
-      "management_url": "https://api.netbird.io:443",
-      "log_level":      "info"
-    }
-  }
+Requires --netbird-config flag or NB_SETUP_KEY/NB_JWT_TOKEN env vars.
 
-Credentials can also be set via NB_SETUP_KEY or NB_JWT_TOKEN env vars.`,
+Netbird config JSON format:
+  {
+    "device_name":    "my-device",
+    "setup_key":      "your-setup-key",
+    "management_url": "https://api.netbird.io:443"
+  }`,
 	Run: func(cmd *cobra.Command, args []string) {
 		runNetbird()
 	},
@@ -55,7 +52,7 @@ var commandNetbirdStatus = &cobra.Command{
 var nbEngine *netbird_integration.Engine
 
 func init() {
-	commandNetbirdRun.PersistentFlags().StringVarP(&netbirdConfigPath, "config", "c", "", "path to unified config file (JSON)")
+	commandNetbirdRun.PersistentFlags().StringVarP(&netbirdConfigPath, "netbird-config", "", "", "path to netbird config JSON")
 	mainCommand.AddCommand(commandNetbirdRun)
 	mainCommand.AddCommand(commandNetbirdStatus)
 }
