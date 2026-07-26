@@ -97,7 +97,7 @@ func (e *Engine) Start() error {
 		return fmt.Errorf("netbird embed new: %w", err)
 	}
 
-	startCtx, startCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	startCtx, startCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer startCancel()
 
 	if err := client.Start(startCtx); err != nil {
