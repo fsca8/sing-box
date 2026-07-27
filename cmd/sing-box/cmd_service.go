@@ -175,29 +175,64 @@ type nbDaemon struct {
 }
 
 func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
+	// Log to file FIRST
+	logPath := filepath.Join(os.TempDir(), "sing-box-service.log")
+	logFile, _ := os.Create(logPath)
+	if logFile != nil {
+		defer logFile.Close()
+		fmt.Fprintf(logFile, "EXECUTE CALLED args=%v dataDir=?\n", args)
+		logFile.Sync()
+	}
+
 	changes <- svc.Status{State: svc.StartPending}
 	dataDir := serviceDataDir()
 	cfgPath := filepath.Join(dataDir, "sing-box-config.json")
 
+	if logFile != nil {
+		fmt.Fprintf(logFile, "dataDir=%s cfgPath=%s\n", dataDir, cfgPath)
+		logFile.Sync()
+	}
+
 	// Check if config exists
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		log.Warn("service: no config at ", cfgPath, ", exiting")
-		return false, 0 // clean exit, SCM will not restart
+		msg := fmt.Sprintf("no config at %s, exiting", cfgPath)
+		if logFile != nil {
+			fmt.Fprintln(logFile, msg)
+			logFile.Sync()
+		}
+		log.Warn("service: ", msg)
+		return false, 0
+	}
+	if logFile != nil {
+		fmt.Fprintf(logFile, "config found at %s\n", cfgPath)
+		logFile.Sync()
 	}
 
 	log.Info("service: config found, starting engines")
 	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
-	log.Info("service: reported Running to SCM")
+	if logFile != nil {
+		fmt.Fprintln(logFile, "Running state reported to SCM")
+	}
 
-	// Start engines in background (netbird cold start takes ~48s)
+	// Start engines in background
 	type result struct {
 		cleanup func()
 		err     error
 	}
 	resCh := make(chan result, 1)
 	go func() {
+		if logFile != nil {
+			fmt.Fprintln(logFile, "goroutine: starting runAllEngines")
+		}
 		runAllEnableNetbird = true
 		cleanup, err := runAllEngines(cfgPath)
+		if logFile != nil {
+			if err != nil {
+				fmt.Fprintf(logFile, "goroutine: runAllEngines error: %v\n", err)
+			} else {
+				fmt.Fprintf(logFile, "goroutine: runAllEngines returned cleanup=%v\n", cleanup != nil)
+			}
+		}
 		resCh <- result{cleanup, err}
 	}()
 
@@ -210,10 +245,19 @@ func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes ch
 			case svc.Interrogate:
 				changes <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
+				if logFile != nil {
+					fmt.Fprintln(logFile, "SCM stop signal received")
+				}
 				loop = false
 			}
 		case res := <-resCh:
-			// Engine finished (error or unexpected exit)
+			if logFile != nil {
+				if res.err != nil {
+					fmt.Fprintf(logFile, "engine error: %v\n", res.err)
+				} else {
+					fmt.Fprintln(logFile, "engine startup complete (no error)")
+				}
+			}
 			if res.err != nil {
 				log.Error("service: engine error: ", res.err)
 			} else if res.cleanup != nil {
@@ -223,15 +267,26 @@ func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes ch
 		}
 	}
 
-	// Stop engines
-	close(d.stopCh) // signal runAllEngines if still running
+	if logFile != nil {
+		fmt.Fprintln(logFile, "stopping engines")
+	}
 	log.Info("service: stopping engines")
 	select {
 	case res := <-resCh:
 		if res.cleanup != nil {
 			res.cleanup()
+			if logFile != nil {
+				fmt.Fprintln(logFile, "cleanup called")
+			}
 		}
 	default:
+		if logFile != nil {
+			fmt.Fprintln(logFile, "no cleanup needed (engines never started)")
+		}
+	}
+	if logFile != nil {
+		fmt.Fprintln(logFile, "EXIT OK")
+		logFile.Sync()
 	}
 	return false, 0
 }
