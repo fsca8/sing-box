@@ -18,15 +18,23 @@ import (
 
 var (
 	runAllNetbirdConfig string
+	runAllEnableNetbird bool
 )
 
 var commandRunAll = &cobra.Command{
 	Use:   "run-all",
 	Short: "Run sing-box and netbird engines simultaneously",
-	Long: `Start both sing-box and netbird in one process.
+	Long: `Start sing-box and optionally netbird in one process.
 
 -c: sing-box config (same format as 'run')
 --netbird-config: netbird config JSON (optional, falls back to env vars)
+--enable-netbird: start netbird engine alongside sing-box (default: false)
+
+When --enable-netbird is true and netbird config is available:
+  - netbird engine starts first
+  - DNS queries route through netbird's handler chain
+  - Traffic to 100.121.0.0/16 goes through netbird tunnel
+When --enable-netbird is false (default), runs sing-box only.
 
 Netbird config:
   {"device_name":"...", "setup_key":"...", "management_url":"..."}
@@ -40,6 +48,7 @@ Netbird config:
 
 func init() {
 	commandRunAll.PersistentFlags().StringVarP(&runAllNetbirdConfig, "netbird-config", "", "", "path to netbird config JSON")
+	commandRunAll.PersistentFlags().BoolVarP(&runAllEnableNetbird, "enable-netbird", "", false, "start netbird engine alongside sing-box")
 	mainCommand.AddCommand(commandRunAll)
 }
 
@@ -48,42 +57,46 @@ func runAll() error {
 		return E.New("-c config path required")
 	}
 
-	// ---- 1. Start netbird engine FIRST ----
-	nbCfg := buildNetbirdConfig()
 	var nbEngine *netbird_integration.Engine
-	if nbCfg.SetupKey != "" || nbCfg.JWTToken != "" {
+	nbCfg := buildNetbirdConfig()
+	hasNBCredentials := nbCfg.SetupKey != "" || nbCfg.JWTToken != ""
+
+	// ---- 1. Start netbird engine FIRST (if enabled) ----
+	if runAllEnableNetbird && hasNBCredentials {
 		nbEngine = netbird_integration.NewEngine(nbCfg)
 		if err := nbEngine.Start(); err != nil {
 			log.Warn("netbird engine failed to start: ", err)
 		} else {
-			// Expose the embed client for DNS resolution
 			if c := nbEngine.GetClient(); c != nil {
 				netbird_integration.SetClient(c)
 				log.Info("netbird DNS resolver available")
 			}
 			log.Info("netbird engine started")
 		}
+	} else if runAllEnableNetbird && !hasNBCredentials {
+		log.Warn("--enable-netbird is set but no netbird credentials found, skipping")
 	} else {
-		log.Info("no netbird credentials, skipping netbird engine")
+		log.Info("netbird disabled, running sing-box only")
 	}
 
-	// ---- 2. Read and enhance sing-box config (inject netbird DNS) ----
-	// Read raw config, inject netbird entries, write to temp file
+	// ---- 2. Read and enhance sing-box config ----
 	rawConfig, err := os.ReadFile(configPaths[0])
 	if err != nil {
 		return E.Cause(err, "read config")
 	}
-	modified, err := injectNetbirdJSON(rawConfig)
-	if err != nil {
-		return E.Cause(err, "inject netbird DNS")
+	// Inject netbird DNS/route config only when netbird is active
+	if runAllEnableNetbird && nbEngine != nil && nbEngine.IsRunning() {
+		modified, err := injectNetbirdJSON(rawConfig)
+		if err != nil {
+			return E.Cause(err, "inject netbird DNS")
+		}
+		tmpPath := configPaths[0] + ".nb-tmp.json"
+		if err := os.WriteFile(tmpPath, modified, 0644); err != nil {
+			return E.Cause(err, "write temp config")
+		}
+		defer os.Remove(tmpPath)
+		configPaths = []string{tmpPath}
 	}
-	tmpPath := configPaths[0] + ".nb-tmp.json"
-	if err := os.WriteFile(tmpPath, modified, 0644); err != nil {
-		return E.Cause(err, "write temp config")
-	}
-	defer os.Remove(tmpPath)
-	// Override config path to use the modified version
-	configPaths = []string{tmpPath}
 
 	optionsList, err := readConfig()
 	if err != nil {
@@ -95,7 +108,7 @@ func runAll() error {
 		options = optionsList[0].options
 	}
 
-	// ---- 3. Start sing-box (DNS module will use netbird transport) ----
+	// ---- 3. Start sing-box ----
 	_, instanceCancel, err := create(options)
 	if err != nil {
 		return err
@@ -120,8 +133,6 @@ func runAll() error {
 }
 
 // injectNetbirdJSON adds netbird DNS server and route entries to raw config JSON.
-// No hardcoded domains: all DNS queries go through netbird's transport first;
-// non-custom domains are forwarded to the fallback DNS by the transport itself.
 func injectNetbirdJSON(rawData []byte) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(rawData, &raw); err != nil {
@@ -137,7 +148,6 @@ func injectNetbirdJSON(rawData []byte) ([]byte, error) {
 	servers, _ := dnsSection["servers"].([]any)
 	servers = append(servers, map[string]any{"type": "netbird", "tag": "nb"})
 	dnsSection["servers"] = servers
-	// Set netbird as the default DNS resolver (no domain rules needed)
 	dnsSection["final"] = "nb"
 
 	// Inject route rule for netbird internal IPs
