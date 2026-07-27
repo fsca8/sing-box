@@ -8,10 +8,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
+	"sync"
 
 	"github.com/sagernet/sing-box/log"
-	"github.com/sagernet/sing-box/experimental/netbird_integration"
 	"github.com/spf13/cobra"
 
 	"golang.org/x/sys/windows/svc"
@@ -189,19 +188,11 @@ func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes ch
 	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	log.Info("netbird service: reported Running to SCM")
 
-	// Start engines in background goroutine
-	type engResult struct {
-		cleanup func()
-		err     error
-	}
-	resultCh := make(chan engResult, 1)
-	go func() {
-		runAllEnableNetbird = true
-		cleanup, err := runAllEngines(cfgPath, d.stopCh)
-		resultCh <- engResult{cleanup, err}
-	}()
-
 	// Wait for SCM signals in main goroutine
+	// Engines are started by HTTP API call (from Flutter UI), not automatically.
+	ctl := &nbControl{stopCh: d.stopCh, cfgPath: cfgPath}
+	go ctl.serveHTTP()
+
 	loop := true
 	for loop {
 		select {
@@ -212,49 +203,7 @@ func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes ch
 			case svc.Stop, svc.Shutdown:
 				loop = false
 			}
-		case res := <-resultCh:
-			// runAllEngines finished (config missing or error)
-			if res.err != nil {
-				log.Error("netbird service: engine error: ", res.err)
-			} else if res.cleanup != nil {
-				// Shouldn't happen — runAllEngines only returns after stopCh
-				log.Warn("netbird service: unexpected engine exit")
-			}
-			// No config yet — keep running idle
-			if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-				log.Info("netbird service: no config yet, idle waiting")
-				// Re-enter idle loop
-				go func() {
-					// Poll for config file
-					for {
-						select {
-						case <-d.stopCh:
-							return
-						case <-time.After(5 * time.Second):
-							if _, err := os.Stat(cfgPath); err == nil {
-								runAllEnableNetbird = true
-								cleanup, err := runAllEngines(cfgPath, d.stopCh)
-								resultCh <- engResult{cleanup, err}
-								return
-							}
-						}
-					}
-				}()
-			}
 		}
-	}
-
-	// Stop signal received — signal engines
-	close(d.stopCh)
-	log.Info("netbird service: stopping engines")
-	// Wait for resultCh if engines started
-	select {
-	case res := <-resultCh:
-		if res.cleanup != nil {
-			res.cleanup()
-		}
-	case <-time.After(10 * time.Second):
-		log.Warn("netbird service: force stop after timeout")
 	}
 	return false, 0
 }
@@ -262,21 +211,63 @@ func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes ch
 // ---- HTTP Control API (on 127.0.0.1:41732) ----
 
 type nbControl struct {
-	engine *netbird_integration.Engine
-	stopCh chan struct{}
+	stopCh  chan struct{}
+	cfgPath string
+	mu      sync.Mutex
+	running bool
+	cleanup func()
 }
 
-func (c *nbControl) serve() {
+func (c *nbControl) serveHTTP() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"running": c.engine.IsRunning(),
-		})
+	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.running {
+			json.NewEncoder(w).Encode(map[string]string{"status": "already_running"})
+			return
+		}
+		go func() {
+			runAllEnableNetbird = true
+			stopCh := make(chan struct{})
+			cleanup, err := runAllEngines(c.cfgPath, stopCh)
+			c.mu.Lock()
+			if err != nil {
+				log.Error("service: engine start failed: ", err)
+				c.running = false
+				c.mu.Unlock()
+				return
+			}
+			c.cleanup = cleanup
+			c.running = true
+			c.mu.Unlock()
+			log.Info("service: engines started via HTTP API")
+			// The stopCh is not used here — engines are stopped via /stop endpoint
+			// which calls cleanup. runAllEngines blocks until stopCh receives,
+			// so we need to block here too to keep the goroutine alive.
+			<-stopCh
+		}()
+		json.NewEncoder(w).Encode(map[string]string{"status": "starting"})
 	})
 	mux.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"status": "stopping"})
-		close(c.stopCh)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.cleanup != nil {
+			c.cleanup()
+			c.running = false
+			c.cleanup = nil
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
+	})
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		c.mu.Lock()
+		running := c.running
+		c.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"running": running,
+		})
 	})
 	server := &http.Server{Addr: "127.0.0.1:41732", Handler: mux}
+	log.Info("service: HTTP control API on 127.0.0.1:41732")
 	server.ListenAndServe()
 }
