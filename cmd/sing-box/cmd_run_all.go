@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -240,6 +241,7 @@ func buildNetbirdConfig() *netbird_integration.Config {
 		JWTToken:      os.Getenv("NB_JWT_TOKEN"),
 		ManagementURL: envOrDefault("NB_MANAGEMENT_URL", "https://api.netbird.io:443"),
 		LogLevel:      envOrDefault("NB_LOG_LEVEL", "info"),
+		DataDir:       filepath.Dir(configPaths[0]),
 	}
 	if runAllNetbirdConfig != "" {
 		data, err := os.ReadFile(runAllNetbirdConfig)
