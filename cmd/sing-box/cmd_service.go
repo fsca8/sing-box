@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/experimental/netbird_integration"
@@ -179,30 +180,28 @@ type nbDaemon struct {
 
 func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
 	changes <- svc.Status{State: svc.StartPending}
-	log.Info("netbird service: starting engine in background")
+	log.Info("netbird service: starting engines")
 
-	// Start netbird engine in background — SCM has 30s timeout for
-	// StartPending→Running transition; netbird cold start takes ~48s.
-	cfg := buildNetbirdConfig()
-	engine := netbird_integration.NewEngine(cfg)
+	// Determine config path from data dir (passed via serviceDataDir())
+	dataDir := serviceDataDir()
+	cfgPath := filepath.Join(dataDir, "sing-box-config.json")
 
 	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
-	log.Info("netbird service: reported Running to SCM, engine starting async")
+	log.Info("netbird service: reported Running to SCM")
 
-	// Start engine async
+	// Start engines in background goroutine
+	type engResult struct {
+		cleanup func()
+		err     error
+	}
+	resultCh := make(chan engResult, 1)
 	go func() {
-		if err := engine.Start(); err != nil {
-			log.Error("netbird service: engine start failed: ", err)
-			return
-		}
-		log.Info("netbird service: engine started")
+		runAllEnableNetbird = true
+		cleanup, err := runAllEngines(cfgPath, d.stopCh)
+		resultCh <- engResult{cleanup, err}
 	}()
 
-	// Start HTTP control API
-	ctl := &nbControl{engine: engine, stopCh: d.stopCh}
-	go ctl.serve()
-
-	// Wait for stop signal
+	// Wait for SCM signals in main goroutine
 	loop := true
 	for loop {
 		select {
@@ -213,14 +212,50 @@ func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes ch
 			case svc.Stop, svc.Shutdown:
 				loop = false
 			}
-		case <-d.stopCh:
-			loop = false
+		case res := <-resultCh:
+			// runAllEngines finished (config missing or error)
+			if res.err != nil {
+				log.Error("netbird service: engine error: ", res.err)
+			} else if res.cleanup != nil {
+				// Shouldn't happen — runAllEngines only returns after stopCh
+				log.Warn("netbird service: unexpected engine exit")
+			}
+			// No config yet — keep running idle
+			if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
+				log.Info("netbird service: no config yet, idle waiting")
+				// Re-enter idle loop
+				go func() {
+					// Poll for config file
+					for {
+						select {
+						case <-d.stopCh:
+							return
+						case <-time.After(5 * time.Second):
+							if _, err := os.Stat(cfgPath); err == nil {
+								runAllEnableNetbird = true
+								cleanup, err := runAllEngines(cfgPath, d.stopCh)
+								resultCh <- engResult{cleanup, err}
+								return
+							}
+						}
+					}
+				}()
+			}
 		}
 	}
 
-	changes <- svc.Status{State: svc.StopPending}
-	log.Info("netbird service: stopping engine")
-	_ = engine.Stop()
+	// Stop signal received — signal engines
+	close(d.stopCh)
+	log.Info("netbird service: stopping engines")
+	// Wait for resultCh if engines started
+	select {
+	case res := <-resultCh:
+		if res.cleanup != nil {
+			res.cleanup()
+		}
+	case <-time.After(10 * time.Second):
+		log.Warn("netbird service: force stop after timeout")
+	}
 	return false, 0
 }
 

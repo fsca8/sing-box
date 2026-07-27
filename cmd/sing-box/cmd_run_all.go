@@ -59,12 +59,31 @@ func runAll() error {
 	if len(configPaths) == 0 && len(configDirectories) == 0 {
 		return E.New("-c config path required")
 	}
+	stopCh := make(chan struct{})
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		close(stopCh)
+	}()
+	cleanup, err := runAllEngines(configPaths[0], stopCh)
+	if err != nil {
+		return err
+	}
+	if cleanup != nil {
+		cleanup()
+	}
+	return nil
+}
 
+// runAllEngines starts netbird engine (if enabled), reads/injects config,
+// and creates sing-box. Blocks until stopCh receives or sing-box exits.
+// Returns a cleanup function (nil on setup failure).
+func runAllEngines(cfgPath string, stopCh <-chan struct{}) (func(), error) {
 	var nbEngine *netbird_integration.Engine
 	nbCfg := buildNetbirdConfig()
 	hasNBCredentials := nbCfg.SetupKey != "" || nbCfg.JWTToken != ""
 
-	// ---- 1. Start netbird engine FIRST (if enabled) ----
 	t0 := time.Now()
 	var nbDomains []string
 	if runAllEnableNetbird && hasNBCredentials {
@@ -75,7 +94,6 @@ func runAll() error {
 			if c := nbEngine.GetClient(); c != nil {
 				netbird_integration.SetClient(c)
 				log.Info(fmt.Sprintf("netbird DNS resolver available (t=%.1fs)", time.Since(t0).Seconds()))
-				// Wait for initial sync to get custom domains (5s max)
 				t1 := time.Now()
 				domains, err := netbird_integration.WaitAndExtractDomains(c, 5*time.Second)
 				log.Info(fmt.Sprintf("netbird sync wait: %.1fs", time.Since(t1).Seconds()))
@@ -94,22 +112,21 @@ func runAll() error {
 		log.Info("netbird disabled, running sing-box only")
 	}
 
-	// ---- 2. Read and enhance sing-box config ----
-	rawConfig, err := os.ReadFile(configPaths[0])
+	rawConfig, err := os.ReadFile(cfgPath)
 	if err != nil {
-		return E.Cause(err, "read config")
+		log.Warn("read config: ", err)
+		return nil, nil // idle — no config yet
 	}
-	// Inject netbird DNS/route config only when netbird is active
 	if runAllEnableNetbird && nbEngine != nil && nbEngine.IsRunning() {
 		t2 := time.Now()
 		modified, err := injectNetbirdJSON(rawConfig, nbDomains)
 		if err != nil {
-			return E.Cause(err, "inject netbird DNS")
+			return nil, E.Cause(err, "inject netbird DNS")
 		}
 		log.Info(fmt.Sprintf("inject config: %.1fs", time.Since(t2).Seconds()))
-		tmpPath := configPaths[0] + ".nb-tmp.json"
+		tmpPath := cfgPath + ".nb-tmp.json"
 		if err := os.WriteFile(tmpPath, modified, 0644); err != nil {
-			return E.Cause(err, "write temp config")
+			return nil, E.Cause(err, "write temp config")
 		}
 		defer os.Remove(tmpPath)
 		configPaths = []string{tmpPath}
@@ -117,37 +134,35 @@ func runAll() error {
 
 	optionsList, err := readConfig()
 	if err != nil {
-		return E.Cause(err, "read config")
+		return nil, E.Cause(err, "read config")
 	}
-
 	var options option.Options
 	if len(optionsList) > 0 {
 		options = optionsList[0].options
 	}
 
-	// ---- 3. Start sing-box ----
 	t3 := time.Now()
-	_, instanceCancel, err := create(options)
+	instance, instanceCancel, err := create(options)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	_ = instance
 	log.Info(fmt.Sprintf("sing-box started (t=%.1fs, create:%.1fs)", time.Since(t0).Seconds(), time.Since(t3).Seconds()))
 
-	// ---- 4. Wait for signal ----
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigCh
-	log.Info("received signal: ", sig)
-
-	// ---- 5. Shutdown: netbird first, then sing-box ----
-	if nbEngine != nil {
-		if err := nbEngine.Stop(); err != nil {
-			log.Error("netbird stop error: ", err)
+	cleanup := func() {
+		if nbEngine != nil {
+			if err := nbEngine.Stop(); err != nil {
+				log.Error("netbird stop: ", err)
+			}
 		}
+		instanceCancel()
+		log.Info("all engines stopped")
 	}
-	instanceCancel()
-	log.Info("all engines stopped")
-	return nil
+
+	// Wait for stop signal
+	<-stopCh
+	log.Info("received stop signal")
+	return cleanup, nil
 }
 
 // injectNetbirdJSON adds netbird DNS server and route entries to raw config JSON.
