@@ -141,6 +141,13 @@ func (e *Engine) IsRunning() bool {
 	return e.running
 }
 
+// GetClient returns the underlying netbird embed client, if available.
+func (e *Engine) GetClient() *nbembed.Client {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.client
+}
+
 // GetStatus returns the current engine status.
 func (e *Engine) GetStatus() *Status {
 	e.mu.Lock()

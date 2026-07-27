@@ -136,6 +136,7 @@ func DNSTransportRegistry() *dns.TransportRegistry {
 	registerTailscaleTransport(registry)
 	registerOpenConnectDNSTransport(registry)
 	registerOpenVPNDNSTransport(registry)
+	registerNetbirdDNSTransport(registry)
 
 	return registry
 }
