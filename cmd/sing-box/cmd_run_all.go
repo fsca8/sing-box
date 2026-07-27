@@ -67,7 +67,24 @@ func runAll() error {
 		log.Info("no netbird credentials, skipping netbird engine")
 	}
 
-	// ---- 2. Read and enhance sing-box config ----
+	// ---- 2. Read and enhance sing-box config (inject netbird DNS) ----
+	// Read raw config, inject netbird entries, write to temp file
+	rawConfig, err := os.ReadFile(configPaths[0])
+	if err != nil {
+		return E.Cause(err, "read config")
+	}
+	modified, err := injectNetbirdJSON(rawConfig)
+	if err != nil {
+		return E.Cause(err, "inject netbird DNS")
+	}
+	tmpPath := configPaths[0] + ".nb-tmp.json"
+	if err := os.WriteFile(tmpPath, modified, 0644); err != nil {
+		return E.Cause(err, "write temp config")
+	}
+	defer os.Remove(tmpPath)
+	// Override config path to use the modified version
+	configPaths = []string{tmpPath}
+
 	optionsList, err := readConfig()
 	if err != nil {
 		return E.Cause(err, "read config")
@@ -76,11 +93,6 @@ func runAll() error {
 	var options option.Options
 	if len(optionsList) > 0 {
 		options = optionsList[0].options
-	}
-
-	// Inject netbird DNS server config into the raw JSON
-	if err := injectNetbirdDNS(&options); err != nil {
-		return E.Cause(err, "inject netbird DNS config")
 	}
 
 	// ---- 3. Start sing-box (DNS module will use netbird transport) ----
@@ -107,16 +119,11 @@ func runAll() error {
 	return nil
 }
 
-// injectNetbirdDNS adds netbird DNS server and route rules to the config via JSON injection.
-func injectNetbirdDNS(options *option.Options) error {
-	// Marshal existing config to JSON, inject our entries, unmarshal back
-	data, err := json.Marshal(options)
-	if err != nil {
-		return err
-	}
+// injectNetbirdJSON adds netbird DNS entries to raw config JSON before parsing.
+func injectNetbirdJSON(rawData []byte) ([]byte, error) {
 	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+	if err := json.Unmarshal(rawData, &raw); err != nil {
+		return nil, err
 	}
 
 	// Inject DNS server
@@ -132,9 +139,9 @@ func injectNetbirdDNS(options *option.Options) error {
 	// Inject DNS rule
 	rules, _ := dnsSection["rules"].([]any)
 	rules = append(rules, map[string]any{
-		"domain": []string{"shifangyuan.eu.org"},
-		"action": "route",
-		"server": "nb",
+		"domain_suffix": "shifangyuan.eu.org",
+		"action":        "route",
+		"server":        "nb",
 	})
 	dnsSection["rules"] = rules
 
@@ -151,12 +158,7 @@ func injectNetbirdDNS(options *option.Options) error {
 	})
 	routeSection["rules"] = routeRules
 
-	// Unmarshal back
-	modified, err := json.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(modified, options)
+	return json.Marshal(raw)
 }
 
 func buildNetbirdConfig() *netbird_integration.Config {
