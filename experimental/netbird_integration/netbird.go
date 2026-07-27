@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -91,6 +92,12 @@ func (e *Engine) Start() error {
 		ManagementURL: e.cfg.ManagementURL,
 		LogLevel:      e.cfg.LogLevel,
 	}
+	// Persist state to reuse WireGuard key across restarts, avoiding
+	// the ~20s management registration delay on subsequent starts.
+	stateDir := filepath.Join(os.TempDir(), "sing-box-netbird")
+	os.MkdirAll(stateDir, 0700)
+	opts.ConfigPath = filepath.Join(stateDir, "config.json")
+	opts.StatePath = filepath.Join(stateDir, "state.json")
 
 	client, err := nbembed.New(opts)
 	if err != nil {
