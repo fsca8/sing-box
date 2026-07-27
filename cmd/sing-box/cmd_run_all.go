@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -116,6 +117,8 @@ func runAllEngines(cfgPath string) (func(), error) {
 		log.Warn("read config: ", err)
 		return nil, nil // idle — no config yet
 	}
+	// Ensure configPaths includes cfgPath for readConfig()
+	configPaths = []string{cfgPath}
 	if runAllEnableNetbird && nbEngine != nil && nbEngine.IsRunning() {
 		t2 := time.Now()
 		modified, err := injectNetbirdJSON(rawConfig, nbDomains)
@@ -262,12 +265,12 @@ func buildNetbirdConfig() *netbird_integration.Config {
 		LogLevel:      envOrDefault("NB_LOG_LEVEL", "info"),
 		DataDir:       serviceDataDir(),
 	}
-	if runAllNetbirdConfig != "" {
-		data, err := os.ReadFile(runAllNetbirdConfig)
-		if err != nil {
-			log.Warn("read --netbird-config: ", err)
-			return cfg
-		}
+	// Try reading from --netbird-config flag, then from DataDir/netbird-config.json
+	nbCfgPath := runAllNetbirdConfig
+	if nbCfgPath == "" {
+		nbCfgPath = filepath.Join(cfg.DataDir, "netbird-config.json")
+	}
+	if data, err := os.ReadFile(nbCfgPath); err == nil {
 		var fileCfg netbird_integration.Config
 		if err := json.Unmarshal(data, &fileCfg); err != nil {
 			log.Warn("parse --netbird-config: ", err)
