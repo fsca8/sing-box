@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -194,30 +195,32 @@ func injectNetbirdJSON(rawData []byte, customDomains []string) ([]byte, error) {
 	}
 	// Add the netbird outbound rule at the TOP of route rules,
 	// so ip_cidr matching happens before domain/rule_set matching.
-	routeSection["rules"] = append([]any{map[string]any{
+	var nbRouteRules []any
+	nbRouteRules = append(nbRouteRules, map[string]any{
 		"ip_cidr":  []string{"100.121.0.0/16"},
 		"outbound": "nb-out",
-	}}, cleaned...)
-
-	// Add domain-specific DNS and route rules for each custom domain
-	// from the netbird management server. These ensure proxy-originated
-	// connections (which route by domain, not IP) go through nb-out.
+	})
+	// Add domain-specific route rules for each custom domain — before
+	// geosite rules so they take priority over geosite-geolocation-!cn.
 	for _, d := range customDomains {
-		// DNS rule: route this domain through netbird's DNS
+		// Strip trailing dot if present (protobuf domains end with '.')
+		clean := strings.TrimSuffix(d, ".")
+		nbRouteRules = append(nbRouteRules, map[string]any{
+			"domain_suffix": clean,
+			"outbound":      "nb-out",
+		})
+	}
+	routeSection["rules"] = append(nbRouteRules, cleaned...)
+
+	// Add domain-specific DNS rules for each custom domain
+	for _, d := range customDomains {
+		clean := strings.TrimSuffix(d, ".")
 		rules, _ := dnsSection["rules"].([]any)
 		rules = append(rules, map[string]any{
-			"domain_suffix": d,
+			"domain_suffix": clean,
 			"server":        "nb",
 		})
 		dnsSection["rules"] = rules
-
-		// Route rule: send this domain's traffic through netbird tunnel
-		routeRules := routeSection["rules"].([]any)
-		routeRules = append(routeRules, map[string]any{
-			"domain_suffix": d,
-			"outbound":      "nb-out",
-		})
-		routeSection["rules"] = routeRules
 	}
 
 	return json.Marshal(raw)
