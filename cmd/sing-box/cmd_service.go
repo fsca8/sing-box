@@ -3,12 +3,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/sagernet/sing-box/log"
 	"github.com/spf13/cobra"
@@ -179,20 +176,32 @@ type nbDaemon struct {
 
 func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
 	changes <- svc.Status{State: svc.StartPending}
-	log.Info("netbird service: starting engines")
-
-	// Determine config path from data dir (passed via serviceDataDir())
 	dataDir := serviceDataDir()
 	cfgPath := filepath.Join(dataDir, "sing-box-config.json")
 
+	// Check if config exists
+	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
+		log.Warn("service: no config at ", cfgPath, ", exiting")
+		return false, 0 // clean exit, SCM will not restart
+	}
+
+	log.Info("service: config found, starting engines")
 	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
-	log.Info("netbird service: reported Running to SCM")
+	log.Info("service: reported Running to SCM")
 
-	// Wait for SCM signals in main goroutine
-	// Engines are started by HTTP API call (from Flutter UI), not automatically.
-	ctl := &nbControl{stopCh: d.stopCh, cfgPath: cfgPath}
-	go ctl.serveHTTP()
+	// Start engines in background (netbird cold start takes ~48s)
+	type result struct {
+		cleanup func()
+		err     error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		runAllEnableNetbird = true
+		cleanup, err := runAllEngines(cfgPath)
+		resCh <- result{cleanup, err}
+	}()
 
+	// Wait for SCM stop signal or engine completion
 	loop := true
 	for loop {
 		select {
@@ -203,66 +212,26 @@ func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes ch
 			case svc.Stop, svc.Shutdown:
 				loop = false
 			}
+		case res := <-resCh:
+			// Engine finished (error or unexpected exit)
+			if res.err != nil {
+				log.Error("service: engine error: ", res.err)
+			} else if res.cleanup != nil {
+				log.Warn("service: engines exited unexpectedly")
+			}
+			loop = false
 		}
 	}
+
+	// Stop engines
+	close(d.stopCh) // signal runAllEngines if still running
+	log.Info("service: stopping engines")
+	select {
+	case res := <-resCh:
+		if res.cleanup != nil {
+			res.cleanup()
+		}
+	default:
+	}
 	return false, 0
-}
-
-// ---- HTTP Control API (on 127.0.0.1:41732) ----
-
-type nbControl struct {
-	stopCh  chan struct{}
-	cfgPath string
-	mu      sync.Mutex
-	running bool
-	cleanup func()
-}
-
-func (c *nbControl) serveHTTP() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if c.running {
-			json.NewEncoder(w).Encode(map[string]string{"status": "already_running"})
-			return
-		}
-		go func() {
-			runAllEnableNetbird = true
-			cleanup, err := runAllEngines(c.cfgPath)
-			c.mu.Lock()
-			if err != nil {
-				log.Error("service: engine start failed: ", err)
-				c.running = false
-				c.mu.Unlock()
-				return
-			}
-			c.cleanup = cleanup
-			c.running = true
-			c.mu.Unlock()
-			log.Info("service: engines started via HTTP API")
-		}()
-		json.NewEncoder(w).Encode(map[string]string{"status": "starting"})
-	})
-	mux.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if c.cleanup != nil {
-			c.cleanup()
-			c.running = false
-			c.cleanup = nil
-		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
-	})
-	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-		c.mu.Lock()
-		running := c.running
-		c.mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"running": running,
-		})
-	})
-	server := &http.Server{Addr: "127.0.0.1:41732", Handler: mux}
-	log.Info("service: HTTP control API on 127.0.0.1:41732")
-	server.ListenAndServe()
 }
