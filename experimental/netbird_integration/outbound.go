@@ -4,7 +4,9 @@ package netbird_integration
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"os"
 	"strconv"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -17,6 +19,7 @@ import (
 const OutboundType = "netbird"
 
 func RegisterOutbound(registry *outbound.Registry) {
+	fmt.Fprintf(os.Stderr, "[nb-out] RegisterOutbound called\n")
 	outbound.Register[NetbirdOutboundOptions](registry, OutboundType, NewOutbound)
 }
 
@@ -32,6 +35,7 @@ type Outbound struct {
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options NetbirdOutboundOptions) (adapter.Outbound, error) {
 	ctx, cancel := context.WithCancel(ctx)
+	fmt.Fprintf(os.Stderr, "[nb-out] NewOutbound tag=%s\n", tag)
 	return &Outbound{
 		Adapter: outbound.NewAdapter(OutboundType, tag, []string{"tcp", "udp"}, nil),
 		ctx:     ctx,
@@ -45,7 +49,14 @@ func (o *Outbound) DialContext(ctx context.Context, network string, destination 
 		return nil, context.Canceled
 	}
 	addr := net.JoinHostPort(destination.Addr.String(), strconv.Itoa(int(destination.Port)))
-	return client.DialContext(ctx, network, addr)
+	fmt.Fprintf(os.Stderr, "[nb-out] DialContext network=%s addr=%s\n", network, addr)
+	conn, err := client.DialContext(ctx, network, addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[nb-out] FAILED: %v\n", err)
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "[nb-out] SUCCESS addr=%s\n", addr)
+	return conn, nil
 }
 
 func (o *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
