@@ -32,6 +32,7 @@ type Config struct {
 	ManagementURL string `json:"management_url"`
 	AdminURL      string `json:"admin_url"`
 	LogLevel      string `json:"log_level"`
+	DataDir       string `json:"data_dir"`
 }
 
 // Status represents engine status.
@@ -94,7 +95,7 @@ func (e *Engine) Start() error {
 	}
 	// Persist state to reuse WireGuard key across restarts, avoiding
 	// the ~20s management registration delay on subsequent starts.
-	stateDir := filepath.Join(os.TempDir(), "sing-box-netbird")
+	stateDir := filepath.Join(e.cfg.DataDir, "nb-state")
 	os.MkdirAll(stateDir, 0700)
 	opts.ConfigPath = filepath.Join(stateDir, "config.json")
 	opts.StatePath = filepath.Join(stateDir, "state.json")
