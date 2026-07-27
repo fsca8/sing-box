@@ -185,13 +185,6 @@ func injectNetbirdJSON(rawData []byte, customDomains []string) ([]byte, error) {
 	// Inject netbird outbound
 	outbounds, _ := raw["outbounds"].([]any)
 	outbounds = append(outbounds, map[string]any{"type": "netbird", "tag": "nb-out"})
-	// Add a selector outbound so the user can toggle proxy on/off via Clash API
-	// without restarting the process. Default: proxy.
-	outbounds = append(outbounds, map[string]any{
-		"type":      "selector",
-		"tag":       "switch",
-		"outbounds": []string{"proxy", "direct"},
-	})
 	raw["outbounds"] = outbounds
 
 	// Inject route rule for netbird internal IPs — use netbird outbound instead of direct
@@ -238,9 +231,6 @@ func injectNetbirdJSON(rawData []byte, customDomains []string) ([]byte, error) {
 		})
 	}
 	routeSection["rules"] = append(nbRouteRules, cleaned...)
-	// Point route final to the selector so the user can toggle proxy on/off
-	// via Clash API without restarting. The selector defaults to "proxy".
-	routeSection["final"] = "switch"
 
 	// Add domain-specific DNS rules for each custom domain
 	for _, d := range customDomains {
