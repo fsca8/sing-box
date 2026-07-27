@@ -29,3 +29,5 @@ CLAUDE.md
 go.work
 go.work.sum
 *.exe
+singbox.log
+*.exe~

@@ -65,6 +65,7 @@ func runAll() error {
 	hasNBCredentials := nbCfg.SetupKey != "" || nbCfg.JWTToken != ""
 
 	// ---- 1. Start netbird engine FIRST (if enabled) ----
+	t0 := time.Now()
 	var nbDomains []string
 	if runAllEnableNetbird && hasNBCredentials {
 		nbEngine = netbird_integration.NewEngine(nbCfg)
@@ -73,9 +74,11 @@ func runAll() error {
 		} else {
 			if c := nbEngine.GetClient(); c != nil {
 				netbird_integration.SetClient(c)
-				log.Info("netbird DNS resolver available")
-				// Wait for initial sync to get custom domains
-				domains, err := netbird_integration.WaitAndExtractDomains(c, 30*time.Second)
+				log.Info(fmt.Sprintf("netbird DNS resolver available (t=%.1fs)", time.Since(t0).Seconds()))
+				// Wait for initial sync to get custom domains (5s max)
+				t1 := time.Now()
+				domains, err := netbird_integration.WaitAndExtractDomains(c, 5*time.Second)
+				log.Info(fmt.Sprintf("netbird sync wait: %.1fs", time.Since(t1).Seconds()))
 				if err != nil {
 					log.Warn("wait for netbird sync: ", err)
 				} else {
@@ -98,10 +101,12 @@ func runAll() error {
 	}
 	// Inject netbird DNS/route config only when netbird is active
 	if runAllEnableNetbird && nbEngine != nil && nbEngine.IsRunning() {
+		t2 := time.Now()
 		modified, err := injectNetbirdJSON(rawConfig, nbDomains)
 		if err != nil {
 			return E.Cause(err, "inject netbird DNS")
 		}
+		log.Info(fmt.Sprintf("inject config: %.1fs", time.Since(t2).Seconds()))
 		tmpPath := configPaths[0] + ".nb-tmp.json"
 		if err := os.WriteFile(tmpPath, modified, 0644); err != nil {
 			return E.Cause(err, "write temp config")
@@ -121,11 +126,12 @@ func runAll() error {
 	}
 
 	// ---- 3. Start sing-box ----
+	t3 := time.Now()
 	_, instanceCancel, err := create(options)
 	if err != nil {
 		return err
 	}
-	log.Info("sing-box engine started")
+	log.Info(fmt.Sprintf("sing-box started (t=%.1fs, create:%.1fs)", time.Since(t0).Seconds(), time.Since(t3).Seconds()))
 
 	// ---- 4. Wait for signal ----
 	sigCh := make(chan os.Signal, 1)
@@ -160,7 +166,8 @@ func injectNetbirdJSON(rawData []byte, customDomains []string) ([]byte, error) {
 	servers, _ := dnsSection["servers"].([]any)
 	servers = append(servers, map[string]any{"type": "netbird", "tag": "nb"})
 	dnsSection["servers"] = servers
-	dnsSection["final"] = "nb"
+	// Don't set final="nb" — only route custom domains through netbird.
+	// Other domains keep using the original DNS chain (dns-direct/dns-remote).
 
 	// Inject netbird outbound
 	outbounds, _ := raw["outbounds"].([]any)
