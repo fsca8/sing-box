@@ -268,7 +268,7 @@ func buildNetbirdConfig() *netbird_integration.Config {
 	// Try reading from --netbird-config flag, then from DataDir/netbird-config.json
 	nbCfgPath := runAllNetbirdConfig
 	if nbCfgPath == "" {
-		nbCfgPath = filepath.Join(cfg.DataDir, "netbird-config.json")
+		nbCfgPath = filepath.Join(cfg.DataDir, "data", "netbird-config.json")
 	}
 	if data, err := os.ReadFile(nbCfgPath); err == nil {
 		var fileCfg netbird_integration.Config

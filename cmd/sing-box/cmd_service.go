@@ -161,7 +161,8 @@ func runServiceDaemon() error {
 // Falls back to the exe directory when configPaths is empty (service mode).
 func serviceDataDir() string {
 	if len(configPaths) > 0 {
-		return filepath.Dir(configPaths[0])
+		// configPaths might be []string{"config.json"} (default from cobra),
+		// not an actual -c flag. Use exe dir instead for reliable path.
 	}
 	exe, err := os.Executable()
 	if err == nil {
@@ -175,21 +176,27 @@ type nbDaemon struct {
 }
 
 func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
-	// Log to file FIRST
-	logPath := filepath.Join(os.TempDir(), "sing-box-service.log")
-	logFile, _ := os.Create(logPath)
+	// Log to a file that SYSTEM can definitely write to
+	logPath := `C:\Windows\Temp\sing-box-service.log`
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		// Last resort: prepend to a marker file the user can see
+		os.WriteFile(`C:\Windows\Temp\sing-box-service.err`, []byte(err.Error()+"\n"), 0644)
+	}
 	if logFile != nil {
 		defer logFile.Close()
-		fmt.Fprintf(logFile, "EXECUTE CALLED args=%v dataDir=?\n", args)
+		fmt.Fprintf(logFile, "EXECUTE STARTED args=%v\n", args)
 		logFile.Sync()
 	}
 
 	changes <- svc.Status{State: svc.StartPending}
 	dataDir := serviceDataDir()
-	cfgPath := filepath.Join(dataDir, "sing-box-config.json")
+	cfgPath := filepath.Join(dataDir, "data", "sing-box-config.json")
+	exePath, _ := os.Executable()
 
 	if logFile != nil {
-		fmt.Fprintf(logFile, "dataDir=%s cfgPath=%s\n", dataDir, cfgPath)
+		fmt.Fprintf(logFile, "exe=%s dataDir=%s cfgPath=%s len(configPaths)=%d\n",
+			exePath, dataDir, cfgPath, len(configPaths))
 		logFile.Sync()
 	}
 
