@@ -221,29 +221,31 @@ func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes ch
 		fmt.Fprintln(logFile, "Running state reported to SCM")
 	}
 
-	// Start engines in background
-	type result struct {
-		cleanup func()
-		err     error
-	}
-	resCh := make(chan result, 1)
+	// Start engines in background goroutine (non-blocking)
+	var engCleanup func()
 	go func() {
 		if logFile != nil {
 			fmt.Fprintln(logFile, "goroutine: starting runAllEngines")
+			logFile.Sync()
 		}
 		runAllEnableNetbird = true
 		cleanup, err := runAllEngines(cfgPath)
 		if logFile != nil {
 			if err != nil {
-				fmt.Fprintf(logFile, "goroutine: runAllEngines error: %v\n", err)
+				fmt.Fprintf(logFile, "goroutine: engine error: %v\n", err)
+			} else if cleanup != nil {
+				fmt.Fprintln(logFile, "goroutine: engines started, cleanup saved")
 			} else {
-				fmt.Fprintf(logFile, "goroutine: runAllEngines returned cleanup=%v\n", cleanup != nil)
+				fmt.Fprintln(logFile, "goroutine: no config/idle (cleanup=nil)")
 			}
+			logFile.Sync()
 		}
-		resCh <- result{cleanup, err}
+		if err == nil && cleanup != nil {
+			engCleanup = cleanup
+		}
 	}()
 
-	// Wait for SCM stop signal or engine completion
+	// Wait for SCM stop signal only (goroutine is non-blocking by design)
 	loop := true
 	for loop {
 		select {
@@ -254,41 +256,28 @@ func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes ch
 			case svc.Stop, svc.Shutdown:
 				if logFile != nil {
 					fmt.Fprintln(logFile, "SCM stop signal received")
+					logFile.Sync()
 				}
 				loop = false
 			}
-		case res := <-resCh:
-			if logFile != nil {
-				if res.err != nil {
-					fmt.Fprintf(logFile, "engine error: %v\n", res.err)
-				} else {
-					fmt.Fprintln(logFile, "engine startup complete (no error)")
-				}
-			}
-			if res.err != nil {
-				log.Error("service: engine error: ", res.err)
-			} else if res.cleanup != nil {
-				log.Warn("service: engines exited unexpectedly")
-			}
-			loop = false
 		}
 	}
 
 	if logFile != nil {
 		fmt.Fprintln(logFile, "stopping engines")
+		logFile.Sync()
 	}
 	log.Info("service: stopping engines")
-	select {
-	case res := <-resCh:
-		if res.cleanup != nil {
-			res.cleanup()
-			if logFile != nil {
-				fmt.Fprintln(logFile, "cleanup called")
-			}
+	if engCleanup != nil {
+		engCleanup()
+		if logFile != nil {
+			fmt.Fprintln(logFile, "cleanup called")
+			logFile.Sync()
 		}
-	default:
+	} else {
 		if logFile != nil {
 			fmt.Fprintln(logFile, "no cleanup needed (engines never started)")
+			logFile.Sync()
 		}
 	}
 	if logFile != nil {
