@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -150,16 +151,35 @@ func injectNetbirdJSON(rawData []byte) ([]byte, error) {
 	dnsSection["servers"] = servers
 	dnsSection["final"] = "nb"
 
-	// Inject route rule for netbird internal IPs
+	// Inject netbird outbound
+	outbounds, _ := raw["outbounds"].([]any)
+	outbounds = append(outbounds, map[string]any{"type": "netbird", "tag": "nb-out"})
+	raw["outbounds"] = outbounds
+
+	// Inject route rule for netbird internal IPs — use netbird outbound instead of direct
 	routeSection, _ := raw["route"].(map[string]any)
 	if routeSection == nil {
 		routeSection = make(map[string]any)
 		raw["route"] = routeSection
 	}
 	routeRules, _ := routeSection["rules"].([]any)
-	routeRules = append(routeRules, map[string]any{
+	// Replace existing direct->100.121.0.0/16 with nb-out
+	var cleaned []any
+	for _, r := range routeRules {
+		rule, ok := r.(map[string]any)
+		if ok {
+			cidrs, _ := rule["ip_cidr"].([]any)
+			for _, c := range cidrs {
+				if fmt.Sprint(c) == "100.121.0.0/16" {
+					continue // skip old rule with direct outbound
+				}
+			}
+		}
+		cleaned = append(cleaned, r)
+	}
+	routeRules = append(cleaned, map[string]any{
 		"ip_cidr":  []string{"100.121.0.0/16"},
-		"outbound": "direct",
+		"outbound": "nb-out",
 	})
 	routeSection["rules"] = routeRules
 

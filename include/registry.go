@@ -103,6 +103,7 @@ func OutboundRegistry() *outbound.Registry {
 
 	registerQUICOutbounds(registry)
 	registerStubForRemovedOutbounds(registry)
+	registerNetbirdOutbound(registry)
 
 	return registry
 }
