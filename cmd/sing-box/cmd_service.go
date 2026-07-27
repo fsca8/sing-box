@@ -27,7 +27,6 @@ var commandService = &cobra.Command{
 }
 
 func init() {
-	// Subcommands
 	commandService.AddCommand(&cobra.Command{
 		Use:   "install",
 		Short: "Install and auto-start the service on boot",
@@ -154,16 +153,11 @@ func runServiceDaemon() error {
 	if !inService {
 		return fmt.Errorf("not running as a service. Use: service install/start/stop/remove")
 	}
-	return svc.Run(nbServiceName, &nbDaemon{stopCh: make(chan struct{})})
+	return svc.Run(nbServiceName, &nbDaemon{})
 }
 
-// serviceDataDir returns a writable directory for netbird state.
-// Falls back to the exe directory when configPaths is empty (service mode).
+// serviceDataDir returns the directory containing the running executable.
 func serviceDataDir() string {
-	if len(configPaths) > 0 {
-		// configPaths might be []string{"config.json"} (default from cobra),
-		// not an actual -c flag. Use exe dir instead for reliable path.
-	}
 	exe, err := os.Executable()
 	if err == nil {
 		return filepath.Dir(exe)
@@ -171,118 +165,47 @@ func serviceDataDir() string {
 	return os.TempDir()
 }
 
-type nbDaemon struct {
-	stopCh chan struct{}
-}
+type nbDaemon struct{}
 
 func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
-	// Log to a file that SYSTEM can definitely write to
-	logPath := `C:\Windows\Temp\sing-box-service.log`
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		// Last resort: prepend to a marker file the user can see
-		os.WriteFile(`C:\Windows\Temp\sing-box-service.err`, []byte(err.Error()+"\n"), 0644)
-	}
-	if logFile != nil {
-		defer logFile.Close()
-		fmt.Fprintf(logFile, "EXECUTE STARTED args=%v\n", args)
-		logFile.Sync()
-	}
-
 	changes <- svc.Status{State: svc.StartPending}
 	dataDir := serviceDataDir()
 	cfgPath := filepath.Join(dataDir, "data", "sing-box-config.json")
-	exePath, _ := os.Executable()
-
-	if logFile != nil {
-		fmt.Fprintf(logFile, "exe=%s dataDir=%s cfgPath=%s len(configPaths)=%d\n",
-			exePath, dataDir, cfgPath, len(configPaths))
-		logFile.Sync()
-	}
 
 	// Check if config exists
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		msg := fmt.Sprintf("no config at %s, exiting", cfgPath)
-		if logFile != nil {
-			fmt.Fprintln(logFile, msg)
-			logFile.Sync()
-		}
-		log.Warn("service: ", msg)
+		log.Warn("service: no config at ", cfgPath, ", exiting")
 		return false, 0
-	}
-	if logFile != nil {
-		fmt.Fprintf(logFile, "config found at %s\n", cfgPath)
-		logFile.Sync()
 	}
 
 	log.Info("service: config found, starting engines")
 	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
-	if logFile != nil {
-		fmt.Fprintln(logFile, "Running state reported to SCM")
-	}
 
 	// Start engines in background goroutine (non-blocking)
 	var engCleanup func()
 	go func() {
-		if logFile != nil {
-			fmt.Fprintln(logFile, "goroutine: starting runAllEngines")
-			logFile.Sync()
-		}
 		runAllEnableNetbird = true
 		cleanup, err := runAllEngines(cfgPath)
-		if logFile != nil {
-			if err != nil {
-				fmt.Fprintf(logFile, "goroutine: engine error: %v\n", err)
-			} else if cleanup != nil {
-				fmt.Fprintln(logFile, "goroutine: engines started, cleanup saved")
-			} else {
-				fmt.Fprintln(logFile, "goroutine: no config/idle (cleanup=nil)")
-			}
-			logFile.Sync()
-		}
-		if err == nil && cleanup != nil {
+		if err != nil {
+			log.Error("service: engine start failed: ", err)
+		} else if cleanup != nil {
 			engCleanup = cleanup
+			log.Info("service: engines started")
 		}
 	}()
 
-	// Wait for SCM stop signal only (goroutine is non-blocking by design)
-	loop := true
-	for loop {
-		select {
-		case c := <-r:
-			switch c.Cmd {
-			case svc.Interrogate:
-				changes <- c.CurrentStatus
-			case svc.Stop, svc.Shutdown:
-				if logFile != nil {
-					fmt.Fprintln(logFile, "SCM stop signal received")
-					logFile.Sync()
-				}
-				loop = false
+	// Wait for SCM stop signal
+	for {
+		c := <-r
+		switch c.Cmd {
+		case svc.Interrogate:
+			changes <- c.CurrentStatus
+		case svc.Stop, svc.Shutdown:
+			log.Info("service: stopping engines")
+			if engCleanup != nil {
+				engCleanup()
 			}
+			return false, 0
 		}
 	}
-
-	if logFile != nil {
-		fmt.Fprintln(logFile, "stopping engines")
-		logFile.Sync()
-	}
-	log.Info("service: stopping engines")
-	if engCleanup != nil {
-		engCleanup()
-		if logFile != nil {
-			fmt.Fprintln(logFile, "cleanup called")
-			logFile.Sync()
-		}
-	} else {
-		if logFile != nil {
-			fmt.Fprintln(logFile, "no cleanup needed (engines never started)")
-			logFile.Sync()
-		}
-	}
-	if logFile != nil {
-		fmt.Fprintln(logFile, "EXIT OK")
-		logFile.Sync()
-	}
-	return false, 0
 }
