@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/experimental/netbird_integration"
@@ -157,6 +158,19 @@ func runServiceDaemon() error {
 		return fmt.Errorf("not running as a service. Use: service install/start/stop/remove")
 	}
 	return svc.Run(nbServiceName, &nbDaemon{stopCh: make(chan struct{})})
+}
+
+// serviceDataDir returns a writable directory for netbird state.
+// Falls back to the exe directory when configPaths is empty (service mode).
+func serviceDataDir() string {
+	if len(configPaths) > 0 {
+		return filepath.Dir(configPaths[0])
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		return filepath.Dir(exe)
+	}
+	return os.TempDir()
 }
 
 type nbDaemon struct {
