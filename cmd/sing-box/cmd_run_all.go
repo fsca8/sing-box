@@ -119,14 +119,16 @@ func runAll() error {
 	return nil
 }
 
-// injectNetbirdJSON adds netbird DNS entries to raw config JSON before parsing.
+// injectNetbirdJSON adds netbird DNS server and route entries to raw config JSON.
+// No hardcoded domains: all DNS queries go through netbird's transport first;
+// non-custom domains are forwarded to the fallback DNS by the transport itself.
 func injectNetbirdJSON(rawData []byte) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(rawData, &raw); err != nil {
 		return nil, err
 	}
 
-	// Inject DNS server
+	// Inject DNS server — netbird as the final resolver
 	dnsSection, _ := raw["dns"].(map[string]any)
 	if dnsSection == nil {
 		dnsSection = make(map[string]any)
@@ -135,15 +137,8 @@ func injectNetbirdJSON(rawData []byte) ([]byte, error) {
 	servers, _ := dnsSection["servers"].([]any)
 	servers = append(servers, map[string]any{"type": "netbird", "tag": "nb"})
 	dnsSection["servers"] = servers
-
-	// Inject DNS rule
-	rules, _ := dnsSection["rules"].([]any)
-	rules = append(rules, map[string]any{
-		"domain_suffix": "shifangyuan.eu.org",
-		"action":        "route",
-		"server":        "nb",
-	})
-	dnsSection["rules"] = rules
+	// Set netbird as the default DNS resolver (no domain rules needed)
+	dnsSection["final"] = "nb"
 
 	// Inject route rule for netbird internal IPs
 	routeSection, _ := raw["route"].(map[string]any)

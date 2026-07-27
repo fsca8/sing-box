@@ -4,7 +4,9 @@ package netbird_integration
 
 import (
 	"context"
+	"net"
 	"sync"
+	"time"
 
 	mdns "github.com/miekg/dns"
 	nbembed "github.com/netbirdio/netbird/client/embed"
@@ -45,18 +47,20 @@ func RegisterTransport(registry *dns.TransportRegistry) {
 var _ adapter.DNSTransport = (*Transport)(nil)
 
 // Transport resolves DNS queries through netbird's engine DNS handler chain.
-// Custom domains (from management server) return internal IPs; other domains
-// cause sing-box to fall back to the next configured DNS server.
+// Custom domains (from management server) return internal IPs.
+// For non-custom domains, falls back to a public DNS server.
 type Transport struct {
 	tag     string
 	started bool
 	closeCh chan struct{}
+	client  *mdns.Client
 }
 
 func NewTransport(ctx context.Context, logger log.ContextLogger, tag string, options option.LocalDNSServerOptions) (adapter.DNSTransport, error) {
 	return &Transport{
 		tag:     tag,
 		closeCh: make(chan struct{}),
+		client:  &mdns.Client{Net: "udp", Timeout: 5 * time.Second, SingleInflight: true},
 	}, nil
 }
 
@@ -77,13 +81,18 @@ func (t *Transport) Close() error {
 
 func (t *Transport) Reset() {}
 
-// Exchange resolves a DNS query through netbird's handler chain.
+// Exchange resolves a DNS query through netbird's handler chain first.
+// If netbird cannot resolve (Refused), falls back to public DNS.
 func (t *Transport) Exchange(ctx context.Context, message *mdns.Msg) (*mdns.Msg, error) {
 	client := GetClient()
-	if client == nil {
-		return nil, context.Canceled
+	if client != nil {
+		resp, err := client.ResolveDNS(ctx, message)
+		if err == nil && resp != nil && resp.Rcode != mdns.RcodeRefused {
+			return resp, nil
+		}
 	}
-	return client.ResolveDNS(ctx, message)
+	// Fallback: public DNS via UDP
+	return t.fallbackExchange(ctx, message)
 }
 
 // ExchangeAsync wraps Exchange in a goroutine.
@@ -92,4 +101,29 @@ func (t *Transport) ExchangeAsync(ctx context.Context, message *mdns.Msg, callba
 		resp, err := t.Exchange(ctx, message)
 		callback(resp, err)
 	}()
+}
+
+// fallbackServer is the default public DNS server used when netbird can't resolve.
+const fallbackServer = "223.5.5.5:53"
+
+func (t *Transport) fallbackExchange(ctx context.Context, message *mdns.Msg) (*mdns.Msg, error) {
+	// Create a dialer that respects context cancellation
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(ctx, "udp", fallbackServer)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	// Set a deadline on the connection
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	} else {
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	}
+	co := &mdns.Conn{Conn: conn}
+	defer co.Close()
+	if err := co.WriteMsg(message); err != nil {
+		return nil, err
+	}
+	return co.ReadMsg()
 }
