@@ -33,6 +33,31 @@ for arg in "$@"; do
         netbird) WITH_NETBIRD=true ;;
         release) BUILD_MODE="release" ;;
         --netbird) WITH_NETBIRD=true ;;
+        help|--help|-h)
+            echo "sing-box dev build script"
+            echo ""
+            echo "Usage: ./dev.sh [options] [netbird] [release]"
+            echo ""
+            echo "Commands:"
+            echo "  help              Show this help"
+            echo "  release           Release build (-s -w stripped)"
+            echo "  netbird           Include netbird engine (build tag: with_netbird)"
+            echo ""
+            echo "Examples:"
+            echo "  ./dev.sh                          Debug build (sing-box only)"
+            echo "  ./dev.sh release                  Release build (sing-box only)"
+            echo "  ./dev.sh netbird                  Debug build (sing-box + netbird)"
+            echo "  ./dev.sh netbird release          Release build (sing-box + netbird)"
+            echo ""
+            echo "Environment:"
+            echo "  TAGS      Build tags (default: with_utls,with_gvisor,with_quic,with_wireguard,with_clash_api)"
+            echo "  NB        Set to 1 to enable netbird (alternative to 'netbird' arg)"
+            echo "  GOTOOLCHAIN Go toolchain version (default: auto)"
+            echo "  GOOS      Target OS (default: current)"
+            echo "  GOARCH    Target arch (default: current)"
+            echo "  UPSTREAM_VERSION Version prefix (default: testing)"
+            exit 0
+            ;;
     esac
 done
 
@@ -48,7 +73,7 @@ BUILD_DATE="$(date +%Y%m%d)"
 VERSION="${UPSTREAM_VERSION}-${COMMIT_HASH}-${BUILD_DATE}"
 
 # ── Build tags ──────────────────────────────────────────────────────
-BASE_TAGS="${TAGS:-with_utls,with_gvisor,with_clash_api}"
+BASE_TAGS="${TAGS:-with_utls,with_gvisor,with_quic,with_wireguard,with_clash_api}"
 if [ "$WITH_NETBIRD" = true ]; then
     TAGS="${BASE_TAGS},with_netbird"
     OUTPUT="sing-box-netbird-${VERSION}.exe"
