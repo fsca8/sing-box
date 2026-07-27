@@ -59,27 +59,26 @@ func runAll() error {
 	if len(configPaths) == 0 && len(configDirectories) == 0 {
 		return E.New("-c config path required")
 	}
-	stopCh := make(chan struct{})
-	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		<-sigCh
-		close(stopCh)
-	}()
-	cleanup, err := runAllEngines(configPaths[0], stopCh)
+	cleanup, err := runAllEngines(configPaths[0])
 	if err != nil {
 		return err
 	}
-	if cleanup != nil {
-		cleanup()
+	if cleanup == nil {
+		return nil // idle, no config
 	}
+	defer cleanup()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	log.Info("received signal, stopping")
 	return nil
 }
 
 // runAllEngines starts netbird engine (if enabled), reads/injects config,
 // and creates sing-box. Blocks until stopCh receives or sing-box exits.
 // Returns a cleanup function (nil on setup failure).
-func runAllEngines(cfgPath string, stopCh <-chan struct{}) (func(), error) {
+func runAllEngines(cfgPath string) (func(), error) {
 	var nbEngine *netbird_integration.Engine
 	nbCfg := buildNetbirdConfig()
 	hasNBCredentials := nbCfg.SetupKey != "" || nbCfg.JWTToken != ""
@@ -158,10 +157,6 @@ func runAllEngines(cfgPath string, stopCh <-chan struct{}) (func(), error) {
 		instanceCancel()
 		log.Info("all engines stopped")
 	}
-
-	// Wait for stop signal
-	<-stopCh
-	log.Info("received stop signal")
 	return cleanup, nil
 }
 

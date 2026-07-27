@@ -229,8 +229,7 @@ func (c *nbControl) serveHTTP() {
 		}
 		go func() {
 			runAllEnableNetbird = true
-			stopCh := make(chan struct{})
-			cleanup, err := runAllEngines(c.cfgPath, stopCh)
+			cleanup, err := runAllEngines(c.cfgPath)
 			c.mu.Lock()
 			if err != nil {
 				log.Error("service: engine start failed: ", err)
@@ -242,10 +241,6 @@ func (c *nbControl) serveHTTP() {
 			c.running = true
 			c.mu.Unlock()
 			log.Info("service: engines started via HTTP API")
-			// The stopCh is not used here — engines are stopped via /stop endpoint
-			// which calls cleanup. runAllEngines blocks until stopCh receives,
-			// so we need to block here too to keep the goroutine alive.
-			<-stopCh
 		}()
 		json.NewEncoder(w).Encode(map[string]string{"status": "starting"})
 	})
