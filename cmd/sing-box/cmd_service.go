@@ -179,21 +179,28 @@ type nbDaemon struct {
 
 func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
 	changes <- svc.Status{State: svc.StartPending}
+	log.Info("netbird service: starting engine in background")
 
-	// Build netbird config from env / default config
+	// Start netbird engine in background — SCM has 30s timeout for
+	// StartPending→Running transition; netbird cold start takes ~48s.
 	cfg := buildNetbirdConfig()
 	engine := netbird_integration.NewEngine(cfg)
-	if err := engine.Start(); err != nil {
-		log.Error("netbird service: engine start failed: ", err)
-		return false, 1
-	}
-	log.Info("netbird service: engine started")
-
-	// Start HTTP control API on 127.0.0.1:41732
-	ctl := &nbControl{engine: engine, stopCh: d.stopCh}
-	go ctl.serve()
 
 	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
+	log.Info("netbird service: reported Running to SCM, engine starting async")
+
+	// Start engine async
+	go func() {
+		if err := engine.Start(); err != nil {
+			log.Error("netbird service: engine start failed: ", err)
+			return
+		}
+		log.Info("netbird service: engine started")
+	}()
+
+	// Start HTTP control API
+	ctl := &nbControl{engine: engine, stopCh: d.stopCh}
+	go ctl.serve()
 
 	// Wait for stop signal
 	loop := true
