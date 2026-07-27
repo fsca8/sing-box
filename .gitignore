@@ -28,3 +28,4 @@ CLAUDE.md
 # Go workspace (local paths, do not commit)
 go.work
 go.work.sum
+*.exe
