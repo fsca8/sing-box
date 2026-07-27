@@ -48,7 +48,13 @@ func (o *Outbound) DialContext(ctx context.Context, network string, destination 
 	if client == nil {
 		return nil, context.Canceled
 	}
-	addr := net.JoinHostPort(destination.Addr.String(), strconv.Itoa(int(destination.Port)))
+	// Use Fqdn if available (proxy CONNECT requests route by domain, not IP)
+	var addr string
+	if destination.Fqdn != "" {
+		addr = net.JoinHostPort(destination.Fqdn, strconv.Itoa(int(destination.Port)))
+	} else {
+		addr = net.JoinHostPort(destination.Addr.String(), strconv.Itoa(int(destination.Port)))
+	}
 	fmt.Fprintf(os.Stderr, "[nb-out] DialContext network=%s addr=%s\n", network, addr)
 	conn, err := client.DialContext(ctx, network, addr)
 	if err != nil {
