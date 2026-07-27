@@ -105,12 +105,14 @@ func (e *Engine) Start() error {
 		return fmt.Errorf("netbird embed new: %w", err)
 	}
 
+	t1 := time.Now()
 	startCtx, startCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer startCancel()
-
+	t2 := time.Now()
 	if err := client.Start(startCtx); err != nil {
 		return fmt.Errorf("netbird embed start: %w", err)
 	}
+	log.Infof("nbembed.Start() took %.1fs (New=%.1fs)", time.Since(t2).Seconds(), time.Since(t1).Seconds())
 
 	e.client = client
 	e.running = true
