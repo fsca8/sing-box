@@ -22,8 +22,6 @@ func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified s
 	defer recoverError(&retErr)
 	writeMarker("NetbirdStartAll ENTERED")
 	writeMarker("NetbirdStartAll: nbConfig length=" + strconv.Itoa(len(netbirdConfigJSON)))
-	writeMarker("NetbirdStartAll nb config: " + netbirdConfigJSON)
-	writeMarker("NetbirdStartAll sb config: " + singBoxConfig)
 
 	cfg, err := netbird_integration.ParseConfig(netbirdConfigJSON)
 	if err != nil {
