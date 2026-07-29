@@ -104,8 +104,8 @@ func checkJavaVersion() {
 	if err != nil {
 		log.Fatal(E.Cause(err, "check java version"))
 	}
-	if !strings.Contains(javaVersion, "openjdk 17") {
-		log.Fatal("java version should be openjdk 17")
+	if !strings.Contains(javaVersion, "openjdk 17") && !strings.Contains(javaVersion, "openjdk 21") {
+		log.Fatal("java version should be openjdk 17 or 21")
 	}
 }
 
@@ -176,16 +176,16 @@ func buildAndroid() {
 	}, bindTarget)
 
 	// Build legacy variant (SDK 21, no naive outbound)
-	legacyTags := filterTags(sharedTags, "with_naive_outbound")
-	// legacyTags = append(legacyTags, memcTags...)
-	if debugEnabled {
-		legacyTags = append(legacyTags, debugTags...)
-	}
-	buildAndroidVariant(AndroidBuildConfig{
-		AndroidAPI: 21,
-		OutputName: "libbox-legacy.aar",
-		Tags:       legacyTags,
-	}, bindTarget)
+	// legacyTags := filterTags(sharedTags, "with_naive_outbound")
+	// // legacyTags = append(legacyTags, memcTags...)
+	// if debugEnabled {
+	// 	legacyTags = append(legacyTags, debugTags...)
+	// }
+	// buildAndroidVariant(AndroidBuildConfig{
+	// 	AndroidAPI: 21,
+	// 	OutputName: "libbox-legacy.aar",
+	// 	Tags:       legacyTags,
+	// }, bindTarget)
 }
 
 func buildApple() {
