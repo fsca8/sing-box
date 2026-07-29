@@ -51,6 +51,25 @@ func (m *MonitorService) GetConnectionHistory(limit int) string {
 	return string(b)
 }
 
+// ---- Alert rules (stub: always empty until implemented) ----
+
+func (m *MonitorService) AddAlertRule(json string) int64 {
+	if m.collector == nil {
+		return 0
+	}
+	return 0
+}
+
+func (m *MonitorService) DeleteAlertRule(ruleID int64) {
+	if m.collector == nil {
+		return
+	}
+}
+
+func (m *MonitorService) GetAlertRules() string {
+	return "[]"
+}
+
 // EventCallback is implemented by Android/Kotlin to receive event JSON
 type EventCallback interface {
 	SendEvent(json string) error

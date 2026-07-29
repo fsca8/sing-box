@@ -81,6 +81,11 @@ func redirectStderr(path string) error {
 		}
 	}
 
+	if runtime.GOOS == "android" {
+		_ = outputFile.Close()
+		return nil
+	}
+
 	err = debug.SetCrashOutput(outputFile, debug.CrashOptions{})
 	if err != nil {
 		outputFile.Close()

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"runtime"
@@ -54,6 +55,7 @@ func (w *platformInterfaceWrapper) UsePlatformInterface() bool {
 }
 
 func (w *platformInterfaceWrapper) OpenInterface(options *tun.Options, platformOptions option.TunPlatformOptions) (tun.Tun, error) {
+	writeMarker("OpenInterface: begin")
 	if len(options.IncludeUID) > 0 || len(options.ExcludeUID) > 0 {
 		return nil, E.New("platform: unsupported uid options")
 	}
@@ -64,10 +66,12 @@ func (w *platformInterfaceWrapper) OpenInterface(options *tun.Options, platformO
 	if err != nil {
 		return nil, err
 	}
+	writeMarker("OpenInterface: calling OpenTun")
 	tunFd, err := w.iif.OpenTun(&tunOptions{options, routeRanges, platformOptions})
 	if err != nil {
 		return nil, err
 	}
+	writeMarker(fmt.Sprintf("OpenInterface: OpenTun returned fd=%d", tunFd))
 	options.Name, err = getTunnelName(tunFd)
 	if err != nil {
 		return nil, E.Cause(err, "query tun name")
@@ -214,6 +218,9 @@ func (w *platformInterfaceWrapper) FindConnectionOwner(request *adapter.FindConn
 	result, err := w.iif.FindConnectionOwner(request.IpProtocol, request.SourceAddress, request.SourcePort, request.DestinationAddress, request.DestinationPort)
 	if err != nil {
 		return nil, err
+	}
+	if result == nil {
+		return &adapter.ConnectionOwner{}, nil
 	}
 	return &adapter.ConnectionOwner{
 		UserId:              result.UserId,
