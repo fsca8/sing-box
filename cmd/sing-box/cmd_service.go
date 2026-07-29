@@ -156,13 +156,13 @@ func runServiceDaemon() error {
 	return svc.Run(nbServiceName, &nbDaemon{})
 }
 
-// serviceDataDir returns the directory containing the running executable.
+// serviceDataDir returns the app config directory under %%APPDATA%%.
+// Aligns with Flutter's getApplicationSupportDirectory() so both the
+// Flutter UI and the Windows service read/write the same config files.
 func serviceDataDir() string {
-	exe, err := os.Executable()
-	if err == nil {
-		return filepath.Dir(exe)
-	}
-	return os.TempDir()
+	appDir := filepath.Join(os.Getenv("ProgramData"), "io.nekohasekai.sfm.sing_box_flutter")
+	os.MkdirAll(appDir, 0755)
+	return appDir
 }
 
 type nbDaemon struct{}
@@ -170,7 +170,7 @@ type nbDaemon struct{}
 func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
 	changes <- svc.Status{State: svc.StartPending}
 	dataDir := serviceDataDir()
-	cfgPath := filepath.Join(dataDir, "data", "sing-box-config.json")
+		cfgPath := filepath.Join(dataDir, "sing-box-config.json")
 
 	// Check if config exists
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
