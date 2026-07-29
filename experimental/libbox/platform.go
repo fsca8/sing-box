@@ -3,6 +3,7 @@ package libbox
 import C "github.com/sagernet/sing-box/constant"
 
 type PlatformInterface interface {
+	WriteMarker(message string)
 	LocalDNSTransport() LocalDNSTransport
 	UsePlatformAutoDetectInterfaceControl() bool
 	AutoDetectInterfaceControl(fd int32) error

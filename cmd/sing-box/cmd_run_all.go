@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -80,58 +79,39 @@ func runAll() error {
 // and creates sing-box. Blocks until stopCh receives or sing-box exits.
 // Returns a cleanup function (nil on setup failure).
 func runAllEngines(cfgPath string) (func(), error) {
-	var nbEngine *netbird_integration.Engine
-	nbCfg := buildNetbirdConfig()
-	hasNBCredentials := nbCfg.SetupKey != "" || nbCfg.JWTToken != ""
-
 	t0 := time.Now()
-	var nbDomains []string
-	if runAllEnableNetbird && hasNBCredentials {
-		nbEngine = netbird_integration.NewEngine(nbCfg)
-		if err := nbEngine.Start(); err != nil {
-			log.Warn("netbird engine failed to start: ", err)
-		} else {
-			if c := nbEngine.GetClient(); c != nil {
-				netbird_integration.SetClient(c)
-				log.Info(fmt.Sprintf("netbird DNS resolver available (t=%.1fs)", time.Since(t0).Seconds()))
-				t1 := time.Now()
-				domains, err := netbird_integration.WaitAndExtractDomains(c, 5*time.Second)
-				log.Info(fmt.Sprintf("netbird sync wait: %.1fs", time.Since(t1).Seconds()))
-				if err != nil {
-					log.Warn("wait for netbird sync: ", err)
-				} else {
-					nbDomains = domains
-					log.Info(fmt.Sprintf("netbird custom domains: %v", nbDomains))
-				}
-			}
-			log.Info("netbird engine started")
+	var nbEngine *netbird_integration.Engine
+
+	if runAllEnableNetbird {
+		nbCfg := buildNetbirdConfig()
+		rawConfig, err := os.ReadFile(cfgPath)
+		if err != nil {
+			log.Warn("read config: ", err)
+			return nil, nil
 		}
-	} else if runAllEnableNetbird && !hasNBCredentials {
-		log.Warn("--enable-netbird is set but no netbird credentials found, skipping")
+		result, err := netbird_integration.StartAll(nbCfg, rawConfig)
+		if err != nil {
+			log.Warn("netbird start: ", err)
+		}
+		if result != nil {
+			nbEngine = result.Engine
+			if result.ModifiedConfig != nil {
+				tmpPath := cfgPath + ".nb-tmp.json"
+				if err := os.WriteFile(tmpPath, result.ModifiedConfig, 0644); err != nil {
+					return nil, E.Cause(err, "write temp config")
+				}
+				defer os.Remove(tmpPath)
+				configPaths = []string{tmpPath}
+				log.Info(fmt.Sprintf("netbird: injected config written (t=%.1fs)", time.Since(t0).Seconds()))
+			}
+		}
 	} else {
 		log.Info("netbird disabled, running sing-box only")
 	}
 
-	rawConfig, err := os.ReadFile(cfgPath)
-	if err != nil {
-		log.Warn("read config: ", err)
-		return nil, nil // idle — no config yet
-	}
 	// Ensure configPaths includes cfgPath for readConfig()
-	configPaths = []string{cfgPath}
-	if runAllEnableNetbird && nbEngine != nil && nbEngine.IsRunning() {
-		t2 := time.Now()
-		modified, err := injectNetbirdJSON(rawConfig, nbDomains)
-		if err != nil {
-			return nil, E.Cause(err, "inject netbird DNS")
-		}
-		log.Info(fmt.Sprintf("inject config: %.1fs", time.Since(t2).Seconds()))
-		tmpPath := cfgPath + ".nb-tmp.json"
-		if err := os.WriteFile(tmpPath, modified, 0644); err != nil {
-			return nil, E.Cause(err, "write temp config")
-		}
-		defer os.Remove(tmpPath)
-		configPaths = []string{tmpPath}
+	if len(configPaths) == 0 {
+		configPaths = []string{cfgPath}
 	}
 
 	optionsList, err := readConfig()
@@ -143,13 +123,13 @@ func runAllEngines(cfgPath string) (func(), error) {
 		options = optionsList[0].options
 	}
 
-	t3 := time.Now()
+	t1 := time.Now()
 	instance, instanceCancel, err := create(options)
 	if err != nil {
 		return nil, err
 	}
 	_ = instance
-	log.Info(fmt.Sprintf("sing-box started (t=%.1fs, create:%.1fs)", time.Since(t0).Seconds(), time.Since(t3).Seconds()))
+	log.Info(fmt.Sprintf("sing-box started (t=%.1fs)", time.Since(t1).Seconds()))
 
 	cleanup := func() {
 		if nbEngine != nil {
@@ -163,97 +143,18 @@ func runAllEngines(cfgPath string) (func(), error) {
 	return cleanup, nil
 }
 
-// injectNetbirdJSON adds netbird DNS server and route entries to raw config JSON.
-func injectNetbirdJSON(rawData []byte, customDomains []string) ([]byte, error) {
-	var raw map[string]any
-	if err := json.Unmarshal(rawData, &raw); err != nil {
-		return nil, err
-	}
-
-	// Inject DNS server — netbird as the final resolver
-	dnsSection, _ := raw["dns"].(map[string]any)
-	if dnsSection == nil {
-		dnsSection = make(map[string]any)
-		raw["dns"] = dnsSection
-	}
-	servers, _ := dnsSection["servers"].([]any)
-	servers = append(servers, map[string]any{"type": "netbird", "tag": "nb"})
-	dnsSection["servers"] = servers
-	// Don't set final="nb" — only route custom domains through netbird.
-	// Other domains keep using the original DNS chain (dns-direct/dns-remote).
-
-	// Inject netbird outbound
-	outbounds, _ := raw["outbounds"].([]any)
-	outbounds = append(outbounds, map[string]any{"type": "netbird", "tag": "nb-out"})
-	raw["outbounds"] = outbounds
-
-	// Inject route rule for netbird internal IPs — use netbird outbound instead of direct
-	routeSection, _ := raw["route"].(map[string]any)
-	if routeSection == nil {
-		routeSection = make(map[string]any)
-		raw["route"] = routeSection
-	}
-	routeRules, _ := routeSection["rules"].([]any)
-	// Remove any existing rules for 100.121.0.0/16 (from earlier config edits)
-	var cleaned []any
-	for _, r := range routeRules {
-		rule, ok := r.(map[string]any)
-		skip := false
-		if ok {
-			if cidrs, ok := rule["ip_cidr"].([]any); ok {
-				for _, c := range cidrs {
-					if fmt.Sprint(c) == "100.121.0.0/16" {
-						skip = true
-						break
-					}
-				}
-			}
-		}
-		if !skip {
-			cleaned = append(cleaned, r)
-		}
-	}
-	// Add the netbird outbound rule at the TOP of route rules,
-	// so ip_cidr matching happens before domain/rule_set matching.
-	var nbRouteRules []any
-	nbRouteRules = append(nbRouteRules, map[string]any{
-		"ip_cidr":  []string{"100.121.0.0/16"},
-		"outbound": "nb-out",
-	})
-	// Add domain-specific route rules for each custom domain — before
-	// geosite rules so they take priority over geosite-geolocation-!cn.
-	for _, d := range customDomains {
-		// Strip trailing dot if present (protobuf domains end with '.')
-		clean := strings.TrimSuffix(d, ".")
-		nbRouteRules = append(nbRouteRules, map[string]any{
-			"domain_suffix": clean,
-			"outbound":      "nb-out",
-		})
-	}
-	routeSection["rules"] = append(nbRouteRules, cleaned...)
-
-	// Add domain-specific DNS rules for each custom domain
-	for _, d := range customDomains {
-		clean := strings.TrimSuffix(d, ".")
-		rules, _ := dnsSection["rules"].([]any)
-		rules = append(rules, map[string]any{
-			"domain_suffix": clean,
-			"server":        "nb",
-		})
-		dnsSection["rules"] = rules
-	}
-
-	return json.Marshal(raw)
-}
-
 func buildNetbirdConfig() *netbird_integration.Config {
+	dataDir := os.TempDir()
+	if exe, err := os.Executable(); err == nil {
+		dataDir = filepath.Dir(exe)
+	}
 	cfg := &netbird_integration.Config{
 		DeviceName:    envOrDefault("NB_DEVICE_NAME", "sing-netbird"),
 		SetupKey:      os.Getenv("NB_SETUP_KEY"),
 		JWTToken:      os.Getenv("NB_JWT_TOKEN"),
 		ManagementURL: envOrDefault("NB_MANAGEMENT_URL", "https://api.netbird.io:443"),
 		LogLevel:      envOrDefault("NB_LOG_LEVEL", "info"),
-		DataDir:       serviceDataDir(),
+		DataDir:       dataDir,
 	}
 	// Try reading from --netbird-config flag, then from DataDir/netbird-config.json
 	nbCfgPath := runAllNetbirdConfig

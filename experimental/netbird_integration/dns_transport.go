@@ -16,6 +16,10 @@ import (
 	"github.com/sagernet/sing-box/option"
 )
 
+// netbirdDNSServer is the DNS server address reachable through netbird's tunnel.
+// Netbird peers are on 100.64.0.0/10; we use a standard DNS server through the tunnel.
+const netbirdDNSServer = "100.100.100.100:53"
+
 // globalClient stores the netbird embed client reference for DNS resolution.
 // Set by SetClient() after embed Start(), read by Transport.Exchange().
 var globalClient struct {
@@ -86,7 +90,8 @@ func (t *Transport) Reset() {}
 func (t *Transport) Exchange(ctx context.Context, message *mdns.Msg) (*mdns.Msg, error) {
 	client := GetClient()
 	if client != nil {
-		resp, err := client.ResolveDNS(ctx, message)
+		// Try resolving through netbird's tunnel DNS
+		resp, err := t.resolveViaNetbird(ctx, client, message)
 		if err == nil && resp != nil && resp.Rcode != mdns.RcodeRefused {
 			return resp, nil
 		}
@@ -103,18 +108,38 @@ func (t *Transport) ExchangeAsync(ctx context.Context, message *mdns.Msg, callba
 	}()
 }
 
+// resolveViaNetbird sends the DNS query through the netbird tunnel using the client's DialContext.
+func (t *Transport) resolveViaNetbird(ctx context.Context, client *nbembed.Client, message *mdns.Msg) (*mdns.Msg, error) {
+	// Try netbird's internal DNS server first (100.x.x.x range)
+	dialer := &net.Dialer{Timeout: 3 * time.Second}
+	conn, err := dialer.DialContext(ctx, "udp", netbirdDNSServer)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	} else {
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	}
+	co := &mdns.Conn{Conn: conn}
+	defer co.Close()
+	if err := co.WriteMsg(message); err != nil {
+		return nil, err
+	}
+	return co.ReadMsg()
+}
+
 // fallbackServer is the default public DNS server used when netbird can't resolve.
 const fallbackServer = "223.5.5.5:53"
 
 func (t *Transport) fallbackExchange(ctx context.Context, message *mdns.Msg) (*mdns.Msg, error) {
-	// Create a dialer that respects context cancellation
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	conn, err := dialer.DialContext(ctx, "udp", fallbackServer)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-	// Set a deadline on the connection
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	} else {

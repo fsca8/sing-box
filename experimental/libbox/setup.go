@@ -1,6 +1,7 @@
 package libbox
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -94,11 +95,31 @@ func ReloadSetupOptions(options *SetupOptions) {
 	}
 }
 
-func Setup(options *SetupOptions) error {
+func Setup(options *SetupOptions) (err error) {
+	defer recoverError(&err)
 	applySetupOptions(options)
+	writeMarker("Setup ENTERED")
 	os.MkdirAll(sWorkingPath, 0o777)
 	os.MkdirAll(sTempPath, 0o777)
+	// ensure logs directory exists for writeMarker
+	_ = os.MkdirAll(filepath.Join(sBasePath, "logs"), 0o755)
 	return redirectStderr(filepath.Join(sWorkingPath, "CrashReport-"+sCrashReportSource+".log"))
+}
+
+// writeMarker appends a timestamped line to the Go-side marker file.
+// The Kotlin side can read it for combined diagnostic view.
+func writeMarker(msg string) {
+	if sBasePath == "" {
+		return
+	}
+	p := filepath.Join(sBasePath, "logs", "go_markers.txt")
+	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[go-marker] %s\n", msg)
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "[%s] [go] %s\n", time.Now().Format("15:04:05.000"), msg)
 }
 
 func SetLocale(localeID string) error {

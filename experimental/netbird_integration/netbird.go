@@ -16,6 +16,71 @@ import (
 	nbembed "github.com/netbirdio/netbird/client/embed"
 )
 
+// StartAllResult holds the result of StartAll.
+type StartAllResult struct {
+	// ModifiedConfig is the sing-box config with netbird rules injected.
+	// nil if netbird was not started (no credentials).
+	ModifiedConfig []byte
+	// Engine is the running netbird engine. nil if not started.
+	Engine *Engine
+}
+
+// StartAll starts the netbird engine, syncs with the management server,
+// extracts custom domains, and injects netbird DNS/outbound/route rules
+// into the sing-box config.
+//
+// If cfg is nil or has no credentials (SetupKey and JWTToken both empty),
+// returns the original singBoxConfig unchanged with Engine=nil.
+func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
+	result := &StartAllResult{}
+
+	if cfg == nil {
+		return result, nil
+	}
+	hasCreds := cfg.SetupKey != "" || cfg.JWTToken != ""
+	if !hasCreds {
+		log.Info("netbird: no credentials, skipping")
+		result.ModifiedConfig = singBoxConfig
+		return result, nil
+	}
+
+	t0 := time.Now()
+
+	engine := NewEngine(cfg)
+	if err := engine.Start(); err != nil {
+		log.Warn("netbird engine failed to start: ", err)
+		result.ModifiedConfig = singBoxConfig
+		return result, nil // non-fatal: sing-box still runs
+	}
+
+	var customDomains []string
+	if c := engine.GetClient(); c != nil {
+		SetClient(c)
+		log.Info(fmt.Sprintf("netbird DNS resolver available (t=%.1fs)", time.Since(t0).Seconds()))
+		t1 := time.Now()
+		domains, err := WaitAndExtractDomains(c, 5*time.Second)
+		log.Info(fmt.Sprintf("netbird sync wait: %.1fs", time.Since(t1).Seconds()))
+		if err != nil {
+			log.Warn("wait for netbird sync: ", err)
+		} else {
+			customDomains = domains
+			log.Info(fmt.Sprintf("netbird custom domains: %v", customDomains))
+		}
+	}
+	log.Info("netbird engine started")
+
+	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains)
+	if err != nil {
+		// Non-fatal: sing-box still runs, just without netbird rules
+		log.Warn("inject netbird config: ", err)
+		result.ModifiedConfig = singBoxConfig
+	} else {
+		result.ModifiedConfig = modified
+	}
+	result.Engine = engine
+	return result, nil
+}
+
 // Engine wraps the netbird embed client.
 type Engine struct {
 	cfg     *Config
@@ -163,6 +228,21 @@ func (e *Engine) GetStatus() *Status {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return &Status{Running: e.running}
+}
+
+// ParseConfig parses a netbird config JSON string.
+func ParseConfig(configJSON string) (*Config, error) {
+	var cfg Config
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return nil, fmt.Errorf("parse netbird config: %w", err)
+	}
+	if cfg.DeviceName == "" {
+		cfg.DeviceName = "sing-netbird"
+	}
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = "info"
+	}
+	return &cfg, nil
 }
 
 // ReadUnifiedConfig reads a unified JSON config file and returns the parsed structure.
