@@ -16,15 +16,18 @@ import (
 
 const nbServiceName = "SingNetbird"
 
-var commandService = &cobra.Command{
-	Use:   "service",
-	Short: "Manage Windows service (install/start/stop/remove)",
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := runServiceDaemon(); err != nil {
-			log.Fatal(err)
-		}
-	},
-}
+var (
+	commandService = &cobra.Command{
+		Use:   "service",
+		Short: "Manage Windows service (install/start/stop/remove)",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := runServiceDaemon(); err != nil {
+				log.Fatal(err)
+			}
+		},
+	}
+	serviceStartDir string // --config-dir flag value for "service start"
+)
 
 func init() {
 	commandService.AddCommand(&cobra.Command{
@@ -45,7 +48,7 @@ func init() {
 			}
 		},
 	})
-	commandService.AddCommand(&cobra.Command{
+	startCmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the service",
 		Run: func(cmd *cobra.Command, args []string) {
@@ -53,7 +56,9 @@ func init() {
 				log.Fatal(err)
 			}
 		},
-	})
+	}
+	startCmd.Flags().StringVar(&serviceStartDir, "config-dir", "", "config directory path (passed from Flutter)")
+	commandService.AddCommand(startCmd)
 	commandService.AddCommand(&cobra.Command{
 		Use:   "stop",
 		Short: "Stop the service",
@@ -117,7 +122,11 @@ func serviceStart() error {
 		return fmt.Errorf("open service: %w", err)
 	}
 	defer s.Close()
-	if err := s.Start(); err != nil {
+	var startArgs []string
+	if serviceStartDir != "" {
+		startArgs = append(startArgs, "--config-dir", serviceStartDir)
+	}
+	if err := s.Start(startArgs...); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
 	fmt.Printf("Service %q started\n", nbServiceName)
@@ -156,21 +165,40 @@ func runServiceDaemon() error {
 	return svc.Run(nbServiceName, &nbDaemon{})
 }
 
-// serviceDataDir returns the app config directory under %%APPDATA%%.
-// Aligns with Flutter's getApplicationSupportDirectory() so both the
-// Flutter UI and the Windows service read/write the same config files.
+// serviceDataDir returns the config directory.
+// Priority:
+// 1. --config-dir from SCM start args (passed by Flutter "service start")
+// 2. C:\ProgramData\io.nekohasekai.sfm.sing_box_flutter (shared, for boot)
+// 3. Fallback to the directory containing the executable
 func serviceDataDir() string {
-	appDir := filepath.Join(os.Getenv("ProgramData"), "io.nekohasekai.sfm.sing_box_flutter")
-	os.MkdirAll(appDir, 0755)
-	return appDir
+	// Check C:\ProgramData first (shared with user-mode Flutter, survives boot)
+	programDataDir := `C:\ProgramData\io.nekohasekai.sfm.sing_box_flutter`
+	if info, err := os.Stat(filepath.Join(programDataDir, "sing-box-config.json")); err == nil && !info.IsDir() {
+		return programDataDir
+	}
+	// Fallback to executable directory
+	exe, err := os.Executable()
+	if err == nil {
+		return filepath.Dir(exe)
+	}
+	return os.TempDir()
 }
 
 type nbDaemon struct{}
 
 func (d *nbDaemon) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
 	changes <- svc.Status{State: svc.StartPending}
+	// Read config dir from SCM start arguments (passed by "service start --config-dir")
 	dataDir := serviceDataDir()
-		cfgPath := filepath.Join(dataDir, "sing-box-config.json")
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--config-dir" {
+			if d := args[i+1]; d != "" {
+				dataDir = d
+			}
+			break
+		}
+	}
+	cfgPath := filepath.Join(dataDir, "sing-box-config.json")
 
 	// Check if config exists
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
