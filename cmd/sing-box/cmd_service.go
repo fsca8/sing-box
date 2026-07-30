@@ -168,20 +168,13 @@ func runServiceDaemon() error {
 // serviceDataDir returns the config directory.
 // Priority:
 // 1. --config-dir from SCM start args (passed by Flutter "service start")
-// 2. C:\ProgramData\io.nekohasekai.sfm.sing_box_flutter (shared, for boot)
-// 3. Fallback to the directory containing the executable
+// 2. Fallback to {exeDir}\data\
 func serviceDataDir() string {
-	// Check C:\ProgramData first (shared with user-mode Flutter, survives boot)
-	programDataDir := `C:\ProgramData\io.nekohasekai.sfm.sing_box_flutter`
-	if info, err := os.Stat(filepath.Join(programDataDir, "sing-box-config.json")); err == nil && !info.IsDir() {
-		return programDataDir
-	}
-	// Fallback to executable directory
 	exe, err := os.Executable()
 	if err == nil {
-		return filepath.Dir(exe)
+		return filepath.Join(filepath.Dir(exe), "data")
 	}
-	return os.TempDir()
+	return filepath.Join(os.TempDir(), "data")
 }
 
 type nbDaemon struct{}
