@@ -170,6 +170,9 @@ func runServiceDaemon() error {
 // 1. --config-dir from SCM start args (passed by Flutter "service start")
 // 2. Fallback to {exeDir}\data\
 func serviceDataDir() string {
+	if exeDir != "" {
+		return filepath.Join(exeDir, "data")
+	}
 	exe, err := os.Executable()
 	if err == nil {
 		return filepath.Join(filepath.Dir(exe), "data")
