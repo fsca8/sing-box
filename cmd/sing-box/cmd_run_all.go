@@ -83,7 +83,7 @@ func runAllEngines(cfgPath string) (func(), error) {
 	var nbEngine *netbird_integration.Engine
 
 	if runAllEnableNetbird {
-		nbCfg := buildNetbirdConfig()
+		nbCfg := buildNetbirdConfig(cfgPath)
 		rawConfig, err := os.ReadFile(cfgPath)
 		if err != nil {
 			log.Warn("read config: ", err)
@@ -143,11 +143,9 @@ func runAllEngines(cfgPath string) (func(), error) {
 	return cleanup, nil
 }
 
-func buildNetbirdConfig() *netbird_integration.Config {
-	dataDir := os.TempDir()
-	if exe, err := os.Executable(); err == nil {
-		dataDir = filepath.Dir(exe)
-	}
+func buildNetbirdConfig(cfgPath string) *netbird_integration.Config {
+	// Derive data directory from the sing-box config file's location
+	dataDir := filepath.Dir(cfgPath)
 	cfg := &netbird_integration.Config{
 		DeviceName:    envOrDefault("NB_DEVICE_NAME", "sing-netbird"),
 		SetupKey:      os.Getenv("NB_SETUP_KEY"),
@@ -159,7 +157,7 @@ func buildNetbirdConfig() *netbird_integration.Config {
 	// Try reading from --netbird-config flag, then from DataDir/netbird-config.json
 	nbCfgPath := runAllNetbirdConfig
 	if nbCfgPath == "" {
-		nbCfgPath = filepath.Join(cfg.DataDir, "data", "netbird-config.json")
+		nbCfgPath = filepath.Join(cfg.DataDir, "netbird-config.json")
 	}
 	if data, err := os.ReadFile(nbCfgPath); err == nil {
 		var fileCfg netbird_integration.Config
