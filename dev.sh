@@ -90,9 +90,12 @@ LD_VERSION="-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}'"
 # netbird: report the version we ACTUALLY compiled (exact-match tag only,
 # otherwise "development" — never lie about which tag's code we used).
 if [ "$WITH_NETBIRD" = true ]; then
-    NETBIRD_VERSION="$(cd "${NETBIRD_DIR:-$HOME/works/netbird}" && git describe --tags --exact-match 2>/dev/null || echo development)"
+    NETBIRD_DIR="${NETBIRD_DIR:-$HOME/works/netbird}"
+    NETBIRD_VERSION="$(cd "$NETBIRD_DIR" && git describe --tags --exact-match 2>/dev/null || echo development)"
+    NETBIRD_COMMIT="$(cd "$NETBIRD_DIR" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     LD_VERSION="${LD_VERSION} -X 'github.com/netbirdio/netbird/version.version=${NETBIRD_VERSION}'"
-    echo "  netbird version: ${NETBIRD_VERSION} (exact-match)"
+    LD_VERSION="${LD_VERSION} -X 'github.com/sagernet/sing-box/cmd/sing-box.netbirdBuildCommit=${NETBIRD_COMMIT}'"
+    echo "  netbird version: ${NETBIRD_VERSION} (exact-match, commit ${NETBIRD_COMMIT})"
 fi
 
 if [ "$BUILD_MODE" = "release" ]; then
