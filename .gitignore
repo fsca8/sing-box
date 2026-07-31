@@ -24,3 +24,10 @@ CLAUDE.md
 # Build artifacts
 /*.dll
 /sing-box-*.exe
+
+# Go workspace (local paths, do not commit)
+go.work
+go.work.sum
+*.exe
+singbox.log
+*.exe~

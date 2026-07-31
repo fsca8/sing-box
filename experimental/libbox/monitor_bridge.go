@@ -37,7 +37,10 @@ func (m *MonitorService) GetDNSHistory(limit int) string {
 	if m.collector == nil {
 		return "[]"
 	}
-	records := m.collector.GetDNSHistory(limit)
+	records, err := m.collector.QueryDNS(0, limit)
+	if err != nil {
+		return "[]"
+	}
 	b, _ := json.Marshal(records)
 	return string(b)
 }
@@ -46,9 +49,34 @@ func (m *MonitorService) GetConnectionHistory(limit int) string {
 	if m.collector == nil {
 		return "[]"
 	}
-	records := m.collector.GetConnectionHistory(limit)
+	// Query the SQLite DB — the authoritative store. RecordTCP only writes
+	// SQLite (connBuf/ringbuf is never pushed), so reading connBuf would
+	// always return [] even though connections ARE recorded.
+	records, err := m.collector.QueryConnections(0, limit)
+	if err != nil {
+		return "[]"
+	}
 	b, _ := json.Marshal(records)
 	return string(b)
+}
+
+// ---- Alert rules (stub: always empty until implemented) ----
+
+func (m *MonitorService) AddAlertRule(json string) int64 {
+	if m.collector == nil {
+		return 0
+	}
+	return 0
+}
+
+func (m *MonitorService) DeleteAlertRule(ruleID int64) {
+	if m.collector == nil {
+		return
+	}
+}
+
+func (m *MonitorService) GetAlertRules() string {
+	return "[]"
 }
 
 // EventCallback is implemented by Android/Kotlin to receive event JSON

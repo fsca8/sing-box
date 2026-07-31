@@ -27,7 +27,7 @@ type TrackerMetadata struct {
 	Rule         adapter.Rule
 	Outbound     string
 	OutboundType string
-	ConnID       string // monitor connection ID, shared with dialer hooks (our extension)
+	ConnID       string // monitor connection ID, shared with dialer hooks
 }
 
 type Tracker interface {
