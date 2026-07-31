@@ -152,6 +152,21 @@ func SingBoxCommit() string {
 	return ""
 }
 
+// SingBoxBuildTime returns the VCS commit time (RFC3339) of the sing-box
+// build, or "" when no build info is embedded.
+func SingBoxBuildTime() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.time" {
+			return setting.Value
+		}
+	}
+	return ""
+}
+
 func GoVersion() string {
 	return runtime.Version() + ", " + runtime.GOOS + "/" + runtime.GOARCH
 }
