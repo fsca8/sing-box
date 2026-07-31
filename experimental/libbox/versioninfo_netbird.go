@@ -5,13 +5,22 @@ package libbox
 
 import netbirdversion "github.com/netbirdio/netbird/version"
 
-// NetbirdVersion returns the netbird engine version (upstream tag, e.g. "v0.37.3").
+// netbirdBuildCommit is the netbird repo HEAD at build time, injected via
+// ldflags -X. NetbirdCommit() reads the main module's BuildInfo (which is
+// sing-box), so the real netbird revision must be injected explicitly.
+var netbirdBuildCommit = ""
+
+// NetbirdVersion returns the netbird engine version (upstream tag, e.g. "v0.76.0").
 func NetbirdVersion() string {
 	return netbirdversion.NetbirdVersion()
 }
 
-// NetbirdCommit returns the VCS revision (12 chars) of the netbird build,
-// or "" when no build info is embedded.
+// NetbirdCommit returns the netbird repo HEAD (12 chars) injected at build
+// time, or "" when not injected.
 func NetbirdCommit() string {
-	return netbirdversion.NetbirdCommit()
+	rev := netbirdBuildCommit
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	return rev
 }
