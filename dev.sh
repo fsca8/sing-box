@@ -94,7 +94,8 @@ if [ "$WITH_NETBIRD" = true ]; then
     NETBIRD_VERSION="$(cd "$NETBIRD_DIR" && git describe --tags --exact-match 2>/dev/null || echo development)"
     NETBIRD_COMMIT="$(cd "$NETBIRD_DIR" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     LD_VERSION="${LD_VERSION} -X 'github.com/netbirdio/netbird/version.version=${NETBIRD_VERSION}'"
-    LD_VERSION="${LD_VERSION} -X 'github.com/sagernet/sing-box/cmd/sing-box.netbirdBuildCommit=${NETBIRD_COMMIT}'"
+    # main package vars use "main." prefix (full import path does not match in link)
+    LD_VERSION="${LD_VERSION} -X 'main.netbirdBuildCommit=${NETBIRD_COMMIT}'"
     echo "  netbird version: ${NETBIRD_VERSION} (exact-match, commit ${NETBIRD_COMMIT})"
 fi
 
