@@ -69,8 +69,7 @@ fi
 # ── Config ──────────────────────────────────────────────────────────
 # Version prefix: our declared upstream baseline (UPSTREAM_TAG file),
 # overridable via UPSTREAM_VERSION env var.
-UPSTREAM_VERSION="${UPSTREAM_VERSION:-$(tr -d ' 
-\n' < UPSTREAM_TAG 2>/dev/null || echo testing)}"
+UPSTREAM_VERSION="${UPSTREAM_VERSION:-$(cat UPSTREAM_TAG 2>/dev/null | tr -d '[:space:]' || echo testing)}"
 COMMIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
 BUILD_DATE="$(date +%Y%m%d)"
 VERSION="${UPSTREAM_VERSION}-${COMMIT_HASH}-${BUILD_DATE}"
