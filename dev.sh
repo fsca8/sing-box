@@ -87,6 +87,13 @@ fi
 
 # ── Build flags ─────────────────────────────────────────────────────
 LD_VERSION="-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}'"
+# netbird: report the version we ACTUALLY compiled (exact-match tag only,
+# otherwise "development" — never lie about which tag's code we used).
+if [ "$WITH_NETBIRD" = true ]; then
+    NETBIRD_VERSION="$(cd "${NETBIRD_DIR:-$HOME/works/netbird}" && git describe --tags --exact-match 2>/dev/null || echo development)"
+    LD_VERSION="${LD_VERSION} -X 'github.com/netbirdio/netbird/version.version=${NETBIRD_VERSION}'"
+    echo "  netbird version: ${NETBIRD_VERSION} (exact-match)"
+fi
 
 if [ "$BUILD_MODE" = "release" ]; then
     LDFLAGS_SHARED="${LD_VERSION} -s -w -buildid="

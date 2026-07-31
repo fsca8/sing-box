@@ -59,6 +59,7 @@ func printVersion(cmd *cobra.Command, args []string) {
 	if buildTime != "" {
 		version += "BuildTime: " + buildTime + "\n"
 	}
+	version += netbirdVersionLine()
 
 	if C.CGO_ENABLED {
 		version += "CGO: enabled\n"
