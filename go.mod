@@ -1,6 +1,6 @@
 module github.com/sagernet/sing-box
 
-go 1.25.0
+go 1.24.7
 
 require (
 	filippo.io/age v1.3.1
@@ -43,17 +43,17 @@ require (
 	github.com/sagernet/netlink v0.0.0-20240612041022-b9a21c07ac6a
 	github.com/sagernet/nftables v0.3.0-mod.4
 	github.com/sagernet/quic-go v0.59.0-sing-box-mod.4
-	github.com/sagernet/sing v0.8.12-0.20260721063414-596db5dd6ef4
+	github.com/sagernet/sing v0.8.12-0.20260731081310-cb3e09a281aa
 	github.com/sagernet/sing-cloudflared v0.1.3-0.20260706062323-d9787e794aa3
 	github.com/sagernet/sing-mux v0.3.5
 	github.com/sagernet/sing-openconnect v0.0.0-20260722140139-e0c977659ca2
-	github.com/sagernet/sing-openvpn v0.0.0-20260721005523-64b754d1c277
-	github.com/sagernet/sing-quic v0.6.4-0.20260720125339-63fa6a7ebc31
+	github.com/sagernet/sing-openvpn v0.0.0-20260729104525-103eb5fe5eb6
+	github.com/sagernet/sing-quic v0.6.4-0.20260727030926-0b32a5074a40
 	github.com/sagernet/sing-shadowsocks v0.2.8
 	github.com/sagernet/sing-shadowsocks2 v0.2.1
 	github.com/sagernet/sing-shadowtls v0.2.1
-	github.com/sagernet/sing-snell v0.0.0-20260719094200-c43fbee0e839
-	github.com/sagernet/sing-tun v0.8.12-0.20260724023008-68aa7bdc2819
+	github.com/sagernet/sing-snell v0.0.0-20260727093646-7cb813e07b73
+	github.com/sagernet/sing-tun v0.8.12-0.20260729054528-2d9b8aed5fe2
 	github.com/sagernet/sing-usbip v0.0.0-20260616101517-efb91521eddb
 	github.com/sagernet/sing-vmess v0.2.8-0.20250909125414-3aed155119a1
 	github.com/sagernet/smux v1.5.50-sing-box-mod.1
@@ -66,18 +66,17 @@ require (
 	github.com/vishvananda/netns v0.0.5
 	go.uber.org/zap v1.27.1
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
-	golang.org/x/crypto v0.53.0
+	golang.org/x/crypto v0.48.0
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93
-	golang.org/x/mod v0.37.0
-	golang.org/x/net v0.56.0
-	golang.org/x/sync v0.21.0
-	golang.org/x/sys v0.46.0
-	golang.org/x/text v0.38.0
+	golang.org/x/mod v0.33.0
+	golang.org/x/net v0.50.0
+	golang.org/x/sync v0.19.0
+	golang.org/x/sys v0.41.0
+	golang.org/x/text v0.34.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.11
 	howett.net/plist v1.0.1
-	modernc.org/sqlite v1.54.0
 )
 
 require (
@@ -90,20 +89,6 @@ require (
 	github.com/anchore/go-lzo v0.1.0 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
-	github.com/aws/aws-sdk-go-v2 v1.39.1 // indirect
-	github.com/aws/aws-sdk-go-v2/config v1.31.10 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.18.14 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.8 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.8 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.8 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.8 // indirect
-	github.com/aws/aws-sdk-go-v2/service/route53 v1.58.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.29.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.38.5 // indirect
-	github.com/aws/smithy-go v1.23.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect
 	github.com/coreos/go-oidc/v3 v3.17.0 // indirect
@@ -140,7 +125,6 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/fs v0.1.0 // indirect
-	github.com/libdns/route53 v1.6.2 // indirect
 	github.com/libp2p/go-nat v1.0.1-0.20250821073202-01afc089f138 // indirect
 	github.com/libp2p/go-netroute v0.2.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -208,16 +192,17 @@ require (
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/term v0.44.0 // indirect
+	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
-	golang.org/x/tools v0.47.0 // indirect
+	golang.org/x/tools v0.42.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
-	modernc.org/libc v1.74.1 // indirect
+	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.44.3 // indirect
 	zombiezen.com/go/capnproto2 v2.18.2+incompatible // indirect
 )
