@@ -133,6 +133,25 @@ func Version() string {
 	return C.Version
 }
 
+// SingBoxCommit returns the VCS revision (12 chars) of the sing-box build,
+// or "" when no build info is embedded (e.g. -buildvcs=false).
+func SingBoxCommit() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			rev := setting.Value
+			if len(rev) > 12 {
+				rev = rev[:12]
+			}
+			return rev
+		}
+	}
+	return ""
+}
+
 func GoVersion() string {
 	return runtime.Version() + ", " + runtime.GOOS + "/" + runtime.GOARCH
 }
