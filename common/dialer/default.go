@@ -135,6 +135,19 @@ func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDial
 		dialer.Control = control.Append(dialer.Control, markFunc)
 		listener.Control = control.Append(listener.Control, markFunc)
 	}
+
+	// On Android, always auto-detect interface control (protect) even without auto_detect_interface,
+	// otherwise all sockets go through the TUN and create a loop.
+	// This is needed because Android's SELinux blocks /proc/net/ reading which
+	// the normal AutoDetectInterfaceFunc depends on.
+	if C.IsAndroid && networkManager != nil {
+		protectFunc := networkManager.ProtectFunc()
+		if protectFunc != nil {
+			dialer.Control = control.Append(dialer.Control, protectFunc)
+			listener.Control = control.Append(listener.Control, protectFunc)
+		}
+	}
+
 	if options.ReuseAddr {
 		listener.Control = control.Append(listener.Control, control.ReuseAddr())
 	}
