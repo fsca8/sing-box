@@ -90,7 +90,24 @@ LD_VERSION="-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}'"
 # netbird: report the version we ACTUALLY compiled (exact-match tag only,
 # otherwise "development" — never lie about which tag's code we used).
 if [ "$WITH_NETBIRD" = true ]; then
-    NETBIRD_DIR="${NETBIRD_DIR:-$HOME/works/netbird}"
+    # netbird 仓库定位: 环境变量优先; 否则只在 sing-box 仓库上一层目录查找
+    # (仓库约定平级放在同一父目录下, 如 ~/works/{sing-box,netbird})。
+    # 上一层找不到时报错, 提示放到上一层或拉取到上一层。
+    if [ -z "${NETBIRD_DIR:-}" ]; then
+        NETBIRD_DIR=""
+        _parent="$(dirname "$(pwd)")"
+        if [ -d "$_parent/netbird" ]; then
+            NETBIRD_DIR="$_parent/netbird"
+            echo "  找到 netbird: $NETBIRD_DIR"
+        else
+            echo "ERROR: 在上一层 ($_parent) 未找到 netbird 目录" >&2
+            echo "  请将 netbird 仓库放到该目录, 或手动拉取到上一层:" >&2
+            echo "    git clone https://github.com/netbirdio/netbird.git \"$_parent/netbird\"" >&2
+            echo "    # 然后 checkout 所需上游 tag (如 v0.76.0)" >&2
+            echo "  或设置环境变量 NETBIRD_DIR=<绝对路径> 指定位置" >&2
+            exit 1
+        fi
+    fi
     NETBIRD_VERSION="$(cd "$NETBIRD_DIR" && git describe --tags --exact-match 2>/dev/null || echo development)"
     NETBIRD_COMMIT="$(cd "$NETBIRD_DIR" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     LD_VERSION="${LD_VERSION} -X 'github.com/netbirdio/netbird/version.version=${NETBIRD_VERSION}'"

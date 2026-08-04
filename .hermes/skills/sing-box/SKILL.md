@@ -9,7 +9,7 @@ tags: [sing-box, netbird, go, gomobile, libbox, monitor]
 
 # sing-box（后端仓库，my_custom 分支）
 
-sing-box + Netbird 统一 Go 后端。**最终工作分支：`my_custom`**（sing-netbird 已合入，netbird 集成在 `experimental/netbird_integration/`，`with_netbird` build tag 控制）。netbird 仓库保持纯净（checkout 上游 tag 只读构建）。
+sing-box + Netbird 统一 Go 后端。**最终工作分支：`my_custom`**（sing-netbird 已合入，netbird 集成在 `experimental/netbird_integration/`，`with_netbird` build tag 控制）。集成代码 import `github.com/netbirdio/netbird/client/embed`（**非 internal**——internal 包跨模块不可 import，gomobile/embed 均不可用）。netbird 仓库保持纯净（checkout 上游 tag 只读构建）。
 
 ## 构建
 
@@ -33,6 +33,7 @@ bash ~/works/sing-box-flutter/.hermes/skills/sing-box-flutter/scripts/rebuild-li
 
 - **sing-box 版本** = `UPSTREAM_TAG` 文件（如 `v1.14.0-beta.4`）——声明我们基于哪个上游 tag 修改，**不用 git describe**
 - **netbird 版本** = `git describe --tags --exact-match`（仅 HEAD 恰为 tag 才显示，否则 development）
+- `sing-box version` 的 **BuildTime 行 = 嵌入的 vcs.time（commit 时间，非构建时刻）**——`-buildvcs=false` 去掉后 VCS revision 嵌入才有此值
 - 展示：`sing-box version` 命令输出 `Netbird: v0.76.0 (hash)` 行（with_netbird tag 分支文件 cmd_version_netbird.go / stub）
 
 ## 上游合并流程（v1.14.0-beta.4 实测）
@@ -70,4 +71,5 @@ git fetch upstream && git merge <tag>          # my_custom 上
 | UPSTREAM_TAG CRLF | `tr -d '[:space:]'`（单引号内换行的 tr 漏删 \r） |
 | gradle vfs.watch 慢 | flutter 侧 gradle.properties `org.gradle.vfs.watch=false` |
 | netbird 依赖 | 只在 go.work use 引用（go.mod 无 require）——GOWORK=off 编译不过 |
+| route53 依赖冲突 | go.work `replace github.com/libdns/route53 v1.5.0 => v1.6.2` |
 | 用户凭证 | setup key/JWT 一律 [REDACTED]，不写日志/输出 |
