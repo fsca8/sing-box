@@ -10,11 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/experimental/netbird_integration"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing/common/json"
 	E "github.com/sagernet/sing/common/exceptions"
+	"github.com/sagernet/sing/common/json"
 
 	"github.com/spf13/cobra"
 )
@@ -68,10 +69,28 @@ func runAll() error {
 	}
 	defer cleanup()
 
+	// /monitor/shutdown 优雅关闭支持:
+	// Windows 上 Flutter 的 Process.kill 等价 TerminateProcess, 引擎拿不到
+	// 清理机会 (TUN 适配器/路由残留)。Flutter stop() 先 POST /monitor/shutdown,
+	// 这里关闭 stopCh 让 runAll 走与信号退出完全相同的 cleanup() 路径。
+	stopCh := make(chan struct{})
+	monitor.SetShutdownHandler(func() error {
+		select {
+		case <-stopCh:
+		default:
+			close(stopCh)
+		}
+		return nil
+	})
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-	log.Info("received signal, stopping")
+	select {
+	case <-sigCh:
+		log.Info("received signal, stopping")
+	case <-stopCh:
+		log.Info("received shutdown request, stopping")
+	}
 	return nil
 }
 

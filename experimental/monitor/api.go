@@ -27,6 +27,8 @@ func HTTPHandler() http.Handler {
 			handleStats(w, r)
 		case "health":
 			handleHealth(w, r)
+		case "shutdown":
+			handleShutdown(w, r)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			writeJSON(w, map[string]string{"error": "unknown endpoint"})
@@ -107,6 +109,18 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":  status,
 		"dropped": dropped,
 	})
+}
+
+// handleShutdown 触发引擎优雅关闭 (Windows 上 Flutter stop() 先调用此端点,
+// 让引擎走完整 TUN/路由清理后正常退出, 而不是被 TerminateProcess 硬杀)。
+func handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if !ShutdownHandlerRegistered() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		writeJSON(w, map[string]string{"error": "no shutdown handler registered"})
+		return
+	}
+	writeJSON(w, map[string]string{"status": "shutting down"})
+	_ = TriggerShutdown()
 }
 
 func parseQuery(r *http.Request) (since int64, limit int) {
