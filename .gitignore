@@ -31,3 +31,6 @@ go.work.sum
 *.exe
 singbox.log
 *.exe~
+
+# Hermes memory 锁文件 (瞬态, 不入库)
+.hermes/memory/*.lock
