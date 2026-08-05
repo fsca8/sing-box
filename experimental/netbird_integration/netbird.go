@@ -54,22 +54,26 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	}
 
 	var customDomains []string
+	var networkCIDR string
 	if c := engine.GetClient(); c != nil {
 		SetClient(c)
 		log.Info(fmt.Sprintf("netbird DNS resolver available (t=%.1fs)", time.Since(t0).Seconds()))
 		t1 := time.Now()
-		domains, err := WaitAndExtractDomains(c, 5*time.Second)
+		syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		resp, err := WaitSyncResponse(syncCtx, c)
+		syncCancel()
 		log.Info(fmt.Sprintf("netbird sync wait: %.1fs", time.Since(t1).Seconds()))
 		if err != nil {
 			log.Warn("wait for netbird sync: ", err)
 		} else {
-			customDomains = domains
-			log.Info(fmt.Sprintf("netbird custom domains: %v", customDomains))
+			customDomains = ExtractDomainsFromSync(resp)
+			networkCIDR = ExtractNetworkCIDR(resp)
+			log.Info(fmt.Sprintf("netbird custom domains: %v, network: %s", customDomains, networkCIDR))
 		}
 	}
 	log.Info("netbird engine started")
 
-	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains)
+	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains, networkCIDR)
 	if err != nil {
 		// Non-fatal: sing-box still runs, just without netbird rules
 		log.Warn("inject netbird config: ", err)
