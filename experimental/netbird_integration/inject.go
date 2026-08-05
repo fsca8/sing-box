@@ -12,8 +12,10 @@ import (
 //
 // customDomains (from netbird SyncResponse) get domain-specific route and DNS rules
 // pointing to netbird outbound/DNS server so they resolve through the netbird tunnel.
-// The 100.121.0.0/16 range is always routed through netbird.
-func InjectNetbirdJSON(rawData []byte, customDomains []string) ([]byte, error) {
+// networkCIDR (from netbird SyncResponse, e.g. "100.121.0.0/16") is the account's
+// overlay subnet and is always routed through netbird; empty falls back to the
+// netbird default 100.121.0.0/16.
+func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR string) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(rawData, &raw); err != nil {
 		return nil, err
@@ -62,9 +64,14 @@ func InjectNetbirdJSON(rawData []byte, customDomains []string) ([]byte, error) {
 		}
 	}
 	// Netbird internal IP range — always route through netbird outbound
+	// (dynamic from sync; falls back to the netbird default /16)
+	nbCIDR := networkCIDR
+	if nbCIDR == "" {
+		nbCIDR = "100.121.0.0/16"
+	}
 	var nbRouteRules []any
 	nbRouteRules = append(nbRouteRules, map[string]any{
-		"ip_cidr":  []string{"100.121.0.0/16"},
+		"ip_cidr":  []string{nbCIDR},
 		"outbound": "nb-out",
 	})
 	// Domain-specific route rules for each custom domain
