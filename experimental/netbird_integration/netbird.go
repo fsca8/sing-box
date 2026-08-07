@@ -68,6 +68,10 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 		} else {
 			customDomains = ExtractDomainsFromSync(resp)
 			networkCIDR = ExtractNetworkCIDR(resp)
+			// Compute the tunnel DNS server address from the account network
+			// (last-but-one IP of the overlay /16, e.g. 100.121.255.254:53).
+			// Without this, the netbird DNS transport has no reachable target.
+			SetDNSAddr(ComputeDNSAddr(networkCIDR))
 			log.Info(fmt.Sprintf("netbird custom domains: %v, network: %s", customDomains, networkCIDR))
 		}
 	}
