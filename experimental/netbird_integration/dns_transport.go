@@ -4,7 +4,10 @@ package netbird_integration
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -16,15 +19,16 @@ import (
 	"github.com/sagernet/sing-box/option"
 )
 
-// netbirdDNSServer is the DNS server address reachable through netbird's tunnel.
-// Netbird peers are on 100.64.0.0/10; we use a standard DNS server through the tunnel.
-const netbirdDNSServer = "100.100.100.100:53"
+// netbirdDNSPort is the DNS server port inside the netbird tunnel.
+const netbirdDNSPort = 53
 
-// globalClient stores the netbird embed client reference for DNS resolution.
-// Set by SetClient() after embed Start(), read by Transport.Exchange().
+// globalClient stores the netbird embed client reference for DNS resolution
+// plus the tunnel DNS server address (computed from the account network CIDR).
+// Set by SetClient()/SetDNSAddr() after embed Start(), read by Transport.Exchange().
 var globalClient struct {
-	mu     sync.Mutex
-	client *nbembed.Client
+	mu      sync.Mutex
+	client  *nbembed.Client
+	dnsAddr string
 }
 
 func SetClient(c *nbembed.Client) {
@@ -37,6 +41,43 @@ func GetClient() *nbembed.Client {
 	globalClient.mu.Lock()
 	defer globalClient.mu.Unlock()
 	return globalClient.client
+}
+
+// SetDNSAddr records the netbird tunnel DNS server address (host:port).
+func SetDNSAddr(addr string) {
+	globalClient.mu.Lock()
+	defer globalClient.mu.Unlock()
+	globalClient.dnsAddr = addr
+}
+
+// GetDNSAddr returns the netbird tunnel DNS server address (host:port).
+func GetDNSAddr() string {
+	globalClient.mu.Lock()
+	defer globalClient.mu.Unlock()
+	return globalClient.dnsAddr
+}
+
+// ComputeDNSAddr derives the netbird DNS server address from the account's
+// overlay network CIDR. Netbird runs its DNS server on the last-but-one IP of
+// the overlay network (GetLastIPFromNetwork(network, 1) in client/net/net.go),
+// e.g. 100.121.0.0/16 → 100.121.255.254:53. Empty CIDR falls back to the
+// netbird default 100.121.0.0/16. Returns "" when the CIDR cannot be parsed.
+func ComputeDNSAddr(networkCIDR string) string {
+	if networkCIDR == "" {
+		networkCIDR = "100.121.0.0/16"
+	}
+	prefix, err := netip.ParsePrefix(networkCIDR)
+	if err != nil || !prefix.Addr().Is4() || prefix.Bits() >= 32 {
+		return ""
+	}
+	// broadcast = network | ^mask; DNS = broadcast - 1 (same as GetLastIPFromNetwork(_, 1))
+	netU32 := binary.BigEndian.Uint32(prefix.Masked().Addr().AsSlice())
+	hostBits := 32 - prefix.Bits()
+	broadcast := netU32 + (uint32(1)<<hostBits - 1)
+	dnsU32 := broadcast - 1
+	var dnsIP [4]byte
+	binary.BigEndian.PutUint32(dnsIP[:], dnsU32)
+	return net.JoinHostPort(netip.AddrFrom4(dnsIP).String(), fmt.Sprint(netbirdDNSPort))
 }
 
 // DNSTransportType is the sing-box DNS transport type used in config.
@@ -108,11 +149,16 @@ func (t *Transport) ExchangeAsync(ctx context.Context, message *mdns.Msg, callba
 	}()
 }
 
-// resolveViaNetbird sends the DNS query through the netbird tunnel using the client's DialContext.
+// resolveViaNetbird sends the DNS query through the netbird tunnel to the
+// tunnel's DNS server using the netbird client's DialContext (wgnetstack).
+// This is the only path that reaches netbird's in-process DNS handler —
+// a bare net.Dialer would use the host network stack and never enter the tunnel.
 func (t *Transport) resolveViaNetbird(ctx context.Context, client *nbembed.Client, message *mdns.Msg) (*mdns.Msg, error) {
-	// Try netbird's internal DNS server first (100.x.x.x range)
-	dialer := &net.Dialer{Timeout: 3 * time.Second}
-	conn, err := dialer.DialContext(ctx, "udp", netbirdDNSServer)
+	dnsAddr := GetDNSAddr()
+	if dnsAddr == "" {
+		return nil, fmt.Errorf("netbird DNS address not set")
+	}
+	conn, err := client.DialContext(ctx, "udp", dnsAddr)
 	if err != nil {
 		return nil, err
 	}

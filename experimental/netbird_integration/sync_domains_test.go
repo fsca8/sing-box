@@ -4,10 +4,14 @@ package netbird_integration
 
 import (
 	"encoding/json"
+	"math/rand"
+	"net"
+	"net/netip"
 	"strings"
 	"testing"
 
 	mgmProto "github.com/netbirdio/netbird/shared/management/proto"
+	nbnet "github.com/netbirdio/netbird/client/net"
 )
 
 func TestExtractNetworkCIDR(t *testing.T) {
@@ -48,6 +52,56 @@ func TestExtractNetworkCIDR(t *testing.T) {
 	// nil / 空
 	if got := ExtractNetworkCIDR(nil); got != "" {
 		t.Fatalf("nil: got %q", got)
+	}
+}
+
+func TestComputeDNSAddr(t *testing.T) {
+	cases := []struct {
+		name string
+		cidr string
+		want string
+	}{
+		{"default /16", "", "100.121.255.254:53"},
+		{"explicit /16", "100.121.0.0/16", "100.121.255.254:53"},
+		{"component cidr", "100.90.0.0/16", "100.90.255.254:53"},
+		{"legacy masked", "100.64.0.0/16", "100.64.255.254:53"},
+		{"non-default prefix", "10.0.0.0/8", "10.255.255.254:53"},
+		{"/24 network", "192.168.1.0/24", "192.168.1.254:53"},
+		{"invalid", "not-a-cidr", ""},
+		{"ipv6 rejected", "fd00::/8", ""},
+		{"/32 rejected", "100.121.0.1/32", ""},
+	}
+	for _, c := range cases {
+		if got := ComputeDNSAddr(c.cidr); got != c.want {
+			t.Fatalf("%s: ComputeDNSAddr(%q) = %q, want %q", c.name, c.cidr, got, c.want)
+		}
+	}
+}
+
+// TestComputeDNSAddrMatchesNetbird cross-checks ComputeDNSAddr against
+// netbird's own GetLastIPFromNetwork over random /16..//24 overlay networks,
+// proving the two implementations agree on the tunnel DNS server address.
+func TestComputeDNSAddrMatchesNetbird(t *testing.T) {
+	rng := rand.New(rand.NewSource(42))
+	for i := 0; i < 200; i++ {
+		// random /16 inside 100.64.0.0/10 (netbird overlay space)
+		base := uint32(0x64400000) + rng.Uint32()&0x003F0000
+		var b [4]byte
+		b[0] = byte(base >> 24)
+		b[1] = byte(base >> 16)
+		b[2] = byte(base >> 8)
+		b[3] = byte(base)
+		addr := netip.AddrFrom4(b)
+		prefix := netip.PrefixFrom(addr, 16)
+
+		dnsIP, err := nbnet.GetLastIPFromNetwork(prefix, 1)
+		if err != nil {
+			t.Fatalf("iter %d: GetLastIPFromNetwork(%s): %v", i, prefix, err)
+		}
+		want := net.JoinHostPort(dnsIP.String(), "53")
+		if got := ComputeDNSAddr(prefix.String()); got != want {
+			t.Fatalf("iter %d: ComputeDNSAddr(%s) = %q, want %q (netbird GetLastIPFromNetwork)", i, prefix, got, want)
+		}
 	}
 }
 
