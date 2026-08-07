@@ -167,7 +167,10 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	return conn, nil
 }
 
-// wrapTimingConn wraps a TCP connection with TimingConn for direct outbound TLS measurement.
+// wrapTimingConn wraps a TCP connection with TimingConn for direct outbound TLS
+// measurement. NOTE: the recorded "TLS" latency here is actually the app's
+// first-write→first-read interval (≈1 RTT, may be plain HTTP), NOT a full TLS
+// handshake — see TimingConn docs in experimental/monitor/timingconn.go.
 func (h *Outbound) wrapTimingConn(ctx context.Context, conn net.Conn) net.Conn {
 	if mc := monitor.Get(); mc != nil {
 		if dialMeta := monitor.DialMetaFromContext(ctx); dialMeta != nil && dialMeta.ConnID != "" {
