@@ -105,6 +105,7 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 			Outbound:     r.Outbound,
 			TCPLatencyUs: r.LatencyUs,
 			StartTime:    r.Timestamp,
+			Error:        r.Error,
 		}
 		if r.ProcessPath != "" {
 			conn.ProcessPath = r.ProcessPath
@@ -121,12 +122,15 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 		if r.ProcessPath != "" {
 			conn.ProcessPath = r.ProcessPath
 		}
+		if r.Error != "" {
+			conn.Error = r.Error
+		}
 	}
 	c.mu.Unlock()
 
 	// Sync latency to SQLite (per-connection INSERT, traffic_sync upserts same row by conn_id)
 	if c.db != nil {
-		c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, r.LatencyUs, 0, r.ProcessPath)
+		c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, r.LatencyUs, 0, r.ProcessPath, r.Error)
 	}
 
 	ev := Event{Type: "tcp", Timestamp: r.Timestamp}
@@ -159,9 +163,12 @@ func (c *Collector) RecordTLS(r TLSRecord) {
 		if r.Outbound != "" {
 			conn.Outbound = r.Outbound
 		}
+		if r.Error != "" {
+			conn.Error = r.Error
+		}
 		// Sync latency + host to SQLite
 		if c.db != nil {
-			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs, r.ProcessPath)
+			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs, r.ProcessPath, r.Error)
 			c.db.WriteConnectionMeta(key, r.ServerName, "")
 		}
 	} else {
@@ -175,13 +182,14 @@ func (c *Collector) RecordTLS(r TLSRecord) {
 			TLSLatencyUs: r.LatencyUs,
 			TLSVersion:   r.Version,
 			StartTime:    r.Timestamp,
+			Error:        r.Error,
 		}
 		if r.ProcessPath != "" {
 			conn.ProcessPath = r.ProcessPath
 		}
 		c.connMap[key] = conn
 		if c.db != nil {
-			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs, r.ProcessPath)
+			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs, r.ProcessPath, r.Error)
 			c.db.WriteConnectionMeta(key, r.ServerName, "")
 		}
 	}
@@ -198,9 +206,17 @@ func (c *Collector) RecordTLS(r TLSRecord) {
 func (c *Collector) RecordConnection(r ConnectionRecord) {
 	r.StartTime = nowMs()
 
+	// Use the same key scheme as RecordTCP/RecordTLS (ConnID), so per-connection
+	// TCP/TLS latency hooks can merge into this entry. Fallback to DestIP when
+	// no ConnID is available.
+	key := r.ID
+	if key == "" {
+		key = r.DestIP
+	}
+
 	c.mu.Lock()
 	// Merge with existing connMap entry (from RecordTCP) if present
-	if existing, ok := c.connMap[r.DestIP]; ok {
+	if existing, ok := c.connMap[key]; ok {
 		if existing.Host == "" {
 			existing.Host = r.Host
 		}
@@ -214,14 +230,15 @@ func (c *Collector) RecordConnection(r ConnectionRecord) {
 		c.mu.Unlock()
 		// Update existing SQLite row with metadata (not INSERT)
 		if c.db != nil {
-			c.db.UpdateConnectionMeta(r.DestIP, r.Host, r.Outbound)
+			c.db.UpdateConnectionMeta(key, r.Host, r.Outbound)
 		}
 		ev := Event{Type: "connection", Timestamp: r.StartTime, Connection: existing}
 		c.pushJSON(ev)
 		return
 	}
 	// No TCP hook entry yet — create new
-	c.connMap[r.DestIP] = &r
+	r.ID = key
+	c.connMap[key] = &r
 	c.connBuf.Push(r)
 	c.mu.Unlock()
 

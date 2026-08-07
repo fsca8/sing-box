@@ -101,7 +101,8 @@ func (d *Database) migrate() error {
 		end_time_ms INTEGER,
 		duration_ms INTEGER,
 		closed INTEGER DEFAULT 0,
-		process_path TEXT DEFAULT ''
+		process_path TEXT DEFAULT '',
+		error TEXT DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_conn_conn_id ON connection_records(conn_id);
 	CREATE INDEX IF NOT EXISTS idx_conn_timestamp ON connection_records(start_time_ms);
@@ -110,8 +111,9 @@ func (d *Database) migrate() error {
 	if err != nil {
 		return err
 	}
-	// Add process_path column for existing databases (ignore if already exists)
+	// Add columns for existing databases (ignore if already exists)
 	d.db.Exec("ALTER TABLE connection_records ADD COLUMN process_path TEXT DEFAULT ''")
+	d.db.Exec("ALTER TABLE connection_records ADD COLUMN error TEXT DEFAULT ''")
 	return nil
 }
 
@@ -158,11 +160,11 @@ func (d *Database) flushBatch(batch []dbEvent) {
 	}
 
 	insertDNS := `INSERT INTO dns_records (timestamp_ms, domain, qtype, transport, latency_us, status, answers, ttl, is_rejected) VALUES (?,?,?,?,?,?,?,?,?)`
-	insertConn := `INSERT INTO connection_records (conn_id, host, domain, dest_ip, dest_port, rule, outbound, tcp_latency_us, tls_latency_us, dns_latency_us, tls_version, tls_cipher, upload_bytes, download_bytes, start_time_ms, end_time_ms, duration_ms, closed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	insertConn := `INSERT INTO connection_records (conn_id, host, domain, dest_ip, dest_port, rule, outbound, tcp_latency_us, tls_latency_us, dns_latency_us, tls_version, tls_cipher, upload_bytes, download_bytes, start_time_ms, end_time_ms, duration_ms, closed, error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	updateConnClosed := `UPDATE connection_records SET end_time_ms=?, duration_ms=?, upload_bytes=?, download_bytes=?, closed=1 WHERE conn_id=?`
 	updateConnClosedByDest := `UPDATE connection_records SET end_time_ms=?, duration_ms=?, closed=1 WHERE dest_ip=?`
 	updateConnMeta := `UPDATE connection_records SET host = COALESCE(NULLIF(?, ''), host), outbound = COALESCE(NULLIF(?, ''), outbound) WHERE conn_id = ?`
-	upsertConnLat := `INSERT INTO connection_records (conn_id, dest_ip, domain, outbound, tcp_latency_us, tls_latency_us, start_time_ms, process_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(conn_id) DO UPDATE SET dest_ip = COALESCE(NULLIF(excluded.dest_ip, ''), connection_records.dest_ip), tcp_latency_us = MAX(connection_records.tcp_latency_us, excluded.tcp_latency_us), tls_latency_us = MAX(connection_records.tls_latency_us, excluded.tls_latency_us), domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain), outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound), process_path = COALESCE(NULLIF(excluded.process_path, ''), connection_records.process_path)`
+	upsertConnLat := `INSERT INTO connection_records (conn_id, dest_ip, domain, outbound, tcp_latency_us, tls_latency_us, start_time_ms, process_path, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(conn_id) DO UPDATE SET dest_ip = COALESCE(NULLIF(excluded.dest_ip, ''), connection_records.dest_ip), tcp_latency_us = MAX(connection_records.tcp_latency_us, excluded.tcp_latency_us), tls_latency_us = MAX(connection_records.tls_latency_us, excluded.tls_latency_us), domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain), outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound), process_path = COALESCE(NULLIF(excluded.process_path, ''), connection_records.process_path), error = COALESCE(NULLIF(excluded.error, ''), connection_records.error)`
 
 	stmtDNS, _ := tx.Prepare(insertDNS)
 	stmtConn, _ := tx.Prepare(insertConn)
@@ -204,6 +206,7 @@ func (d *Database) flushBatch(batch []dbEvent) {
 				r.TCPLatencyUs, r.TLSLatencyUs, r.DNSLatencyUs, r.TLSVersion, r.CipherSuite,
 				r.UploadBytes, r.DownloadBytes, r.StartTime,
 				r.EndTime, r.DurationMs, boolToInt(r.Closed),
+				r.Error,
 			)
 		case "connection_closed":
 			r := e.Data.(*ConnectionRecord)
@@ -217,7 +220,8 @@ func (d *Database) flushBatch(batch []dbEvent) {
 		case "connection_latency":
 			r := e.Data.(map[string]interface{})
 			pp, _ := r["process_path"].(string)
-			stmtLat.Exec(r["conn_id"], r["dest_ip"], r["domain"], r["outbound"], r["tcp"], r["tls"], r["start_time"], pp)
+			errStr, _ := r["error"].(string)
+			stmtLat.Exec(r["conn_id"], r["dest_ip"], r["domain"], r["outbound"], r["tcp"], r["tls"], r["start_time"], pp, errStr)
 		case "traffic_sync":
 			records := e.Data.(*[]TrafficRecord)
 			upsertTraffic := `INSERT INTO connection_records
@@ -307,12 +311,12 @@ func (d *Database) WriteConnectionMeta(connID, host, outbound string) {
 	d.UpdateConnectionMeta(connID, host, outbound)
 }
 
-func (d *Database) WriteLatency(connID, destIP, domain, outbound string, tcpLatencyUs, tlsLatencyUs int64, processPath string) {
+func (d *Database) WriteLatency(connID, destIP, domain, outbound string, tcpLatencyUs, tlsLatencyUs int64, processPath, errStr string) {
 	if connID == "" || (tcpLatencyUs == 0 && tlsLatencyUs == 0) {
 		return
 	}
 	select {
-	case d.writeCh <- dbEvent{Kind: "connection_latency", Data: map[string]interface{}{"conn_id": connID, "dest_ip": destIP, "domain": domain, "outbound": outbound, "tcp": tcpLatencyUs, "tls": tlsLatencyUs, "start_time": time.Now().UnixMilli(), "process_path": processPath}}:
+	case d.writeCh <- dbEvent{Kind: "connection_latency", Data: map[string]interface{}{"conn_id": connID, "dest_ip": destIP, "domain": domain, "outbound": outbound, "tcp": tcpLatencyUs, "tls": tlsLatencyUs, "start_time": time.Now().UnixMilli(), "process_path": processPath, "error": errStr}}:
 	default:
 		d.dropped.Add(1)
 	}
@@ -350,7 +354,7 @@ func (d *Database) QueryDNS(since int64, limit int) ([]DNSRecord, error) {
 
 func (d *Database) QueryConnections(since int64, limit int) ([]ConnectionRecord, error) {
 	rows, err := d.db.Query(
-		"SELECT conn_id, host, domain, dest_ip, dest_port, rule, outbound, tcp_latency_us, tls_latency_us, dns_latency_us, tls_version, tls_cipher, upload_bytes, download_bytes, start_time_ms, end_time_ms, duration_ms, closed, process_path FROM connection_records WHERE start_time_ms > ? ORDER BY start_time_ms DESC LIMIT ?",
+		"SELECT conn_id, host, domain, dest_ip, dest_port, rule, outbound, tcp_latency_us, tls_latency_us, dns_latency_us, tls_version, tls_cipher, upload_bytes, download_bytes, start_time_ms, end_time_ms, duration_ms, closed, process_path, error FROM connection_records WHERE start_time_ms > ? ORDER BY start_time_ms DESC LIMIT ?",
 		since, limit,
 	)
 	if err != nil {
@@ -369,7 +373,7 @@ func (d *Database) QueryConnections(since int64, limit int) ([]ConnectionRecord,
 			durMsVal   interface{}
 			procPathVal interface{}
 		)
-		if err := rows.Scan(&r.ID, &r.Host, &r.Domain, &r.DestIP, &r.DestPort, &r.Rule, &r.Outbound, &r.TCPLatencyUs, &r.TLSLatencyUs, &dnsLatVal, &tlsVerVal, &tlsCipVal, &r.UploadBytes, &r.DownloadBytes, &r.StartTime, &endTimeVal, &durMsVal, &r.Closed, &procPathVal); err != nil {
+		if err := rows.Scan(&r.ID, &r.Host, &r.Domain, &r.DestIP, &r.DestPort, &r.Rule, &r.Outbound, &r.TCPLatencyUs, &r.TLSLatencyUs, &dnsLatVal, &tlsVerVal, &tlsCipVal, &r.UploadBytes, &r.DownloadBytes, &r.StartTime, &endTimeVal, &durMsVal, &r.Closed, &procPathVal, &r.Error); err != nil {
 			continue
 		}
 		if dnsLatVal != nil {

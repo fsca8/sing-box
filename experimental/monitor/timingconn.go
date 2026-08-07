@@ -7,17 +7,29 @@ import (
 	"time"
 )
 
-// TimingConn wraps a net.Conn to measure TLS handshake time for direct connections.
+// TimingConn wraps a net.Conn to estimate TLS handshake time for DIRECT outbound
+// connections, where the TLS handshake is performed by the client application
+// itself (sing-box only passes raw bytes through).
 //
-// How it works:
-//   - Records the time of the first Write call (≈ ClientHello sent to remote server)
-//   - Records the time of the first Read call that returns data (≈ ServerHello response received)
-//   - The difference approximates the initial TLS handshake round-trip (≈ 1 RTT)
+// What it measures:
+//   - firstWrite = time of the first Write call (≈ the app's ClientHello going out)
+//   - firstRead  = time of the first Read that returns data (≈ the server's first
+//     response arriving: ServerHello, or application data for TLS 1.3 0-RTT)
+//   - recorded value = firstRead - firstWrite, i.e. roughly ONE network round-trip
 //
-// NOTE: This does NOT measure the full TLS handshake time (which includes certificate
-// verification, key exchange, and Finished messages, typically 2-3 RTTs total).
-// However, it provides a consistent relative metric for comparing TLS performance
-// across different connections on the same network path.
+// It is NOT the full TLS handshake duration: certificate exchange, key exchange,
+// verification and Finished messages (typically 2-3 RTTs in total) are not
+// covered. Treat this metric as "direct-connection first-byte RTT", not "TLS
+// handshake time". (For proxy outbounds, the full handshake including cert
+// exchange is measured in common/tls/client.go instead.)
+//
+// Caveats:
+//   - The first Read may return non-TLS data (e.g. a plain-HTTP response), so
+//     this fires for any direct traffic, TLS or not.
+//   - No record is produced when the connection dies before any Write/Read
+//     (idle keep-alive, RST before data), or when the connection carries no
+//     data at all — missing TLS timing for a direct connection therefore does
+//     NOT imply a failed TCP handshake.
 type TimingConn struct {
 	net.Conn
 	firstWrite  atomic.Int64 // UnixNano of first Write call
