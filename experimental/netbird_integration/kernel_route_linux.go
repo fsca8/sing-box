@@ -1,4 +1,4 @@
-//go:build with_netbird
+//go:build with_netbird && linux
 
 package netbird_integration
 

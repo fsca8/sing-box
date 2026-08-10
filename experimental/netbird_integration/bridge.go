@@ -114,6 +114,7 @@ func StopAllBridges() {
 
 func (bl *bridgeListener) acceptLoop() {
 	defer bl.wg.Done()
+	lastAccept := time.Now()
 	for {
 		conn, err := bl.listener.Accept()
 		if err != nil {
@@ -126,6 +127,11 @@ func (bl *bridgeListener) acceptLoop() {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
+		gap := time.Since(lastAccept)
+		lastAccept = time.Now()
+		if gap > 500*time.Millisecond {
+			log.Warnf("netbird bridge :%d ACCEPT GAP: %v since last accept", bl.port, gap.Round(time.Millisecond))
+		}
 		bl.wg.Add(1)
 		go bl.handleConn(conn)
 	}
@@ -135,38 +141,96 @@ func (bl *bridgeListener) handleConn(conn net.Conn) {
 	defer bl.wg.Done()
 	defer conn.Close()
 
+	t0 := time.Now()
 	upstream, err := net.DialTimeout("tcp", bl.target, 10*time.Second)
 	if err != nil {
 		log.Warnf("netbird bridge :%d → %s dial: %v", bl.port, bl.target, err)
 		return
 	}
 	defer upstream.Close()
+	tDial := time.Since(t0)
 
-	doneCh := make(chan struct{}, 2)
+	// Timing instrumentation: record when each direction's first byte
+	// arrives. SSH banner waits on the sshd→client direction; a large gap
+	// between tFirstC2S and tFirstS2C pinpoints the slow hop.
+	var (
+		mu       sync.Mutex
+		firstC2S time.Time
+		firstS2C time.Time
+		bytesC2S int64
+		bytesS2C int64
+	)
+	tFirstArrived := func(p *time.Time) {
+		mu.Lock()
+		defer mu.Unlock()
+		if p.IsZero() {
+			*p = time.Now()
+		}
+	}
+
+	// Standard TCP proxy: pump both directions independently and let the
+	// connection live until BOTH sides are done. Do NOT tear down on the
+	// first direction's EOF — a transient read error/EOF on one side would
+	// otherwise kill an otherwise healthy SSH session (observed: 2s
+	// forced-close timer produced ~2.15s SSH spikes matching TCP RTO).
+	copyDone := make(chan struct{}, 2)
 	go func() {
-		_, _ = io.Copy(upstream, conn)
-		doneCh <- struct{}{}
+		n, _ := io.Copy(upstream, &firstByteReader{src: conn, onFirst: func() {
+			tFirstArrived(&firstC2S)
+		}})
+		mu.Lock()
+		bytesC2S = n
+		mu.Unlock()
+		if tcp, ok := upstream.(*net.TCPConn); ok {
+			_ = tcp.CloseWrite() // propagate half-close to sshd
+		}
+		copyDone <- struct{}{}
 	}()
 	go func() {
-		_, _ = io.Copy(conn, upstream)
-		doneCh <- struct{}{}
+		// Wrap reads from upstream so we can timestamp the first sshd byte.
+		n, _ := io.Copy(conn, &firstByteReader{src: upstream, onFirst: func() {
+			tFirstArrived(&firstS2C)
+		}})
+		mu.Lock()
+		bytesS2C = n
+		mu.Unlock()
+		if tcp, ok := conn.(*net.TCPConn); ok {
+			_ = tcp.CloseWrite() // propagate half-close back to client
+		}
+		copyDone <- struct{}{}
 	}()
 
-	// Exit when either direction finishes (half-close propagates via
-	// CloseWrite below), or the bridge is stopped.
-	select {
-	case <-doneCh:
-	case <-bl.done:
+	// Wait for both directions, or the bridge being stopped.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-copyDone:
+		case <-bl.done:
+			return
+		}
 	}
-	if tcp, ok := conn.(*net.TCPConn); ok {
-		_ = tcp.CloseWrite()
+	mu.Lock()
+	bC2S, bS2C := bytesC2S, bytesS2C
+	firstC2ST, firstS2CT := firstC2S, firstS2C
+	mu.Unlock()
+	elapsed := time.Since(t0)
+	log.Infof("netbird bridge :%d conn done: dial=%v elapsed=%v c2s=%dB s2c=%dB firstC2S=+%v firstS2C=+%v",
+		bl.port, tDial.Round(time.Millisecond), elapsed.Round(time.Millisecond),
+		bC2S, bS2C,
+		firstC2ST.Sub(t0).Round(time.Millisecond),
+		firstS2CT.Sub(t0).Round(time.Millisecond))
+}
+
+// firstByteReader timestamps the first successful Read from src.
+type firstByteReader struct {
+	src     io.Reader
+	onFirst func()
+	once    sync.Once
+}
+
+func (r *firstByteReader) Read(p []byte) (int, error) {
+	n, err := r.src.Read(p)
+	if n > 0 {
+		r.once.Do(r.onFirst)
 	}
-	if utcp, ok := upstream.(*net.TCPConn); ok {
-		_ = utcp.CloseWrite()
-	}
-	// Give the other direction a moment to flush, then tear down.
-	select {
-	case <-doneCh:
-	case <-time.After(2 * time.Second):
-	}
+	return n, err
 }

@@ -236,6 +236,18 @@ func (e *Engine) Start() error {
 	os.MkdirAll(stateDir, 0700)
 	opts.ConfigPath = filepath.Join(stateDir, "config.json")
 	opts.StatePath = filepath.Join(stateDir, "state.json")
+	// Send netbird engine logs to DataDir/nb-engine.log so relay/P2P
+	// paths, peer states and bridge failures are diagnosable. The default
+	// os.Stderr sink is swallowed by gomobile/libbox on Android.
+	if logFile, err := os.OpenFile(
+		filepath.Join(e.cfg.DataDir, "nb-engine.log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600,
+	); err == nil {
+		opts.LogOutput = logFile
+		log.Info("netbird: engine logs → " + filepath.Join(e.cfg.DataDir, "nb-engine.log"))
+	} else {
+		log.Warn("netbird: open nb-engine.log: ", err)
+	}
 
 	// Kernel-TUN mode (Linux only): real kernel TUN + no netbird-managed
 	// routes. The embed Options expose NoUserspace and DisableClientRoutes;
