@@ -96,6 +96,22 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	}
 	log.Info("netbird engine started")
 
+	// Start configured overlay→local TCP bridges (expose_ports).
+	// These must come after the engine + sync are up: BridgeTCP calls
+	// client.ListenTCP which needs a running engine with a netstack.
+	if len(cfg.ExposePorts) > 0 {
+		log.Infof("netbird: starting %d configured bridge(s)", len(cfg.ExposePorts))
+		for _, ep := range cfg.ExposePorts {
+			if ep.Port <= 0 || ep.Port > 65535 || ep.Target == "" {
+				log.Warnf("netbird: skipping invalid expose port config: %+v", ep)
+				continue
+			}
+			if _, err := BridgeTCP(ep.Port, ep.Target); err != nil {
+				log.Warnf("netbird: bridge :%d → %s failed: %v", ep.Port, ep.Target, err)
+			}
+		}
+	}
+
 	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains, networkCIDR)
 	if err != nil {
 		// Non-fatal: sing-box still runs, just without netbird rules
@@ -135,6 +151,20 @@ type Config struct {
 	// e.g. to reuse a running netbird daemon's identity during migration.
 	// Mutually exclusive with SetupKey/JWTToken.
 	PrivateKey string `json:"private_key"`
+	// ExposePorts lists overlay→local TCP port forwards. Each entry makes
+	// the netbird engine listen on the given port inside the overlay
+	// (netstack) and forward accepted connections to the local target.
+	// Needed because the userspace netstack cannot deliver inbound
+	// connections to processes listening on the host kernel stack.
+	ExposePorts []ExposePortConfig `json:"expose_ports"`
+}
+
+// ExposePortConfig declares one overlay→local TCP forward.
+type ExposePortConfig struct {
+	// Port is the port to listen on inside the netbird overlay.
+	Port int `json:"port"`
+	// Target is the local host:port to forward to (e.g. "127.0.0.1:8022").
+	Target string `json:"target"`
 }
 
 // Status represents engine status.
