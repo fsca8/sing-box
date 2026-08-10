@@ -14,6 +14,8 @@ type Config struct {
 	ManagementURL string `json:"management_url"`
 	AdminURL      string `json:"admin_url"`
 	LogLevel      string `json:"log_level"`
+	KernelTun     bool   `json:"kernel_tun"`
+	PrivateKey    string `json:"private_key"`
 }
 
 type Status struct {
