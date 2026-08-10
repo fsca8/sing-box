@@ -158,7 +158,17 @@ func (t *Transport) resolveViaNetbird(ctx context.Context, client *nbembed.Clien
 	if dnsAddr == "" {
 		return nil, fmt.Errorf("netbird DNS address not set")
 	}
-	conn, err := client.DialContext(ctx, "udp", dnsAddr)
+	// Kernel-TUN mode: client.DialContext is unavailable (no wgnetstack).
+	// Dial the tunnel DNS via the host stack — the kernel route delivers
+	// the packet to wt0.
+	var conn net.Conn
+	var err error
+	if IsKernelMode() {
+		dialer := &net.Dialer{Timeout: 5 * time.Second}
+		conn, err = dialer.DialContext(ctx, "udp", dnsAddr)
+	} else {
+		conn, err = client.DialContext(ctx, "udp", dnsAddr)
+	}
 	if err != nil {
 		return nil, err
 	}
