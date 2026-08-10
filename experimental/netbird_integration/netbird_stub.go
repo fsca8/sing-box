@@ -16,6 +16,13 @@ type Config struct {
 	LogLevel      string `json:"log_level"`
 	KernelTun     bool   `json:"kernel_tun"`
 	PrivateKey    string `json:"private_key"`
+	ExposePorts   []ExposePortConfig `json:"expose_ports"`
+}
+
+// ExposePortConfig declares one overlay→local TCP forward.
+type ExposePortConfig struct {
+	Port   int    `json:"port"`
+	Target string `json:"target"`
 }
 
 type Status struct {
