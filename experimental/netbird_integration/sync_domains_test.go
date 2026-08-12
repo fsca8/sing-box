@@ -109,7 +109,7 @@ func TestInjectNetbirdJSONNetworkCIDR(t *testing.T) {
 	raw := []byte(`{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"rules":[]}}`)
 
 	// 动态网段生效, 且规则插在最前
-	out, err := InjectNetbirdJSON(raw, nil, "100.90.0.0/16", "")
+	out, err := InjectNetbirdJSON(raw, nil, "100.90.0.0/16", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestInjectNetbirdJSONNetworkCIDR(t *testing.T) {
 	}
 
 	// 空网段回退默认
-	out2, err := InjectNetbirdJSON(raw, nil, "", "")
+	out2, err := InjectNetbirdJSON(raw, nil, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

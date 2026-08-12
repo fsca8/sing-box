@@ -53,7 +53,7 @@ func TestInjectBypassUserspace(t *testing.T) {
 	defer SetKernelMode(false)
 	exe, _ := os.Executable()
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang")
+	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestInjectKernelMode(t *testing.T) {
 	SetKernelMode(true)
 	defer SetKernelMode(false)
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), []string{"svc.example.net"}, "100.121.0.0/16", "")
+	out, err := InjectNetbirdJSON([]byte(testConfig), []string{"svc.example.net"}, "100.121.0.0/16", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,11 +202,11 @@ func TestInjectIdempotent(t *testing.T) {
 	SetKernelMode(false)
 	defer SetKernelMode(false)
 
-	first, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang")
+	first, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := InjectNetbirdJSON(first, nil, "", "https://nb.example.wang")
+	second, err := InjectNetbirdJSON(first, nil, "", "https://nb.example.wang", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestInjectExistingManualRulesNotDuplicated(t *testing.T) {
 	  ]},
 	  "dns": {"rules": [{"domain_suffix": ["netbird.io", "nb.example.wang"], "server": "dns-direct"}]}
 	}`
-	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "https://nb.example.wang")
+	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "https://nb.example.wang", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestInjectStaleOverlayCleaned(t *testing.T) {
 	  {"ip_cidr": ["100.121.0.0/16"], "outbound": "nb-out"},
 	  {"rule_set": "geosite-!cn", "outbound": "proxy"}
 	]}, "dns": {}}`
-	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "")
+	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,5 +304,62 @@ func TestInjectStaleOverlayCleaned(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("ip_cidr rules = %d, want 1 (stale cleaned, fresh injected)", count)
+	}
+}
+
+func TestInjectAndroidPackageName(t *testing.T) {
+	SetKernelMode(false)
+	defer SetKernelMode(false)
+	const pkg = "io.nekohasekai.sfm.singbird"
+
+	// Android: package_name bypass replaces process_path (no path lookup).
+	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, _ := ruleList(t, out)
+
+	foundPkg := false
+	foundProc := false
+	for _, r := range route {
+		m := r.(map[string]any)
+		if pn, ok := m["package_name"].([]any); ok {
+			foundPkg = true
+			if len(pn) != 1 || fmt.Sprint(pn[0]) != pkg {
+				t.Fatalf("package_name = %v, want [%s]", pn, pkg)
+			}
+			if m["outbound"] != "direct" {
+				t.Fatalf("package bypass outbound = %v, want direct", m["outbound"])
+			}
+		}
+		if _, ok := m["process_path"]; ok {
+			foundProc = true
+		}
+	}
+	if !foundPkg {
+		t.Fatal("no package_name bypass injected on Android")
+	}
+	if foundProc {
+		t.Fatal("process_path must NOT be injected when androidPackageName is set")
+	}
+	// package bypass must be the first rule.
+	if _, ok := route[0].(map[string]any)["package_name"]; !ok {
+		t.Fatal("package bypass not at the front of route.rules")
+	}
+
+	// Idempotent: re-injecting must not duplicate the package rule.
+	second, err := InjectNetbirdJSON(out, nil, "", "https://nb.example.wang", pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route2, _ := ruleList(t, second)
+	pkgCount := 0
+	for _, r := range route2 {
+		if _, ok := r.(map[string]any)["package_name"]; ok {
+			pkgCount++
+		}
+	}
+	if pkgCount != 1 {
+		t.Fatalf("package_name rules = %d, want 1 (idempotent)", pkgCount)
 	}
 }
