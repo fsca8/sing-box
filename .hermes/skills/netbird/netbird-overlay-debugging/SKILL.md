@@ -68,13 +68,23 @@ ICE 日志判读:
 - **域名规则有漏洞**:引擎用自带 DNS 解析出 IP 后直接按 IP 建连(无域名上下文),`domain_suffix` 规则匹配不到 → 又掉进 proxy → vmrack 候选死灰复燃。**Windows 必须也上 `process_path: [<SINGBIRD_APP_DIR>\sing-box.exe] → direct`**(只命中引擎的 TUN 自环 socket;sing-box 自己的 vless/DNS 拨号旁路 TUN 不受影响,普通 app 流量源进程不同也不受影响——process 规则匹配源进程,不破坏分流)
 - dns.rules 加 `<MGMT_DOMAIN>/netbird.io→dns-direct`(默认 final=dns-remote 过代理,控制面 DNS 200~430ms→58ms)
 - **peer 公网 IP 变动(运营商重拨/CGNAT 换 IP)后**:P2P 重新协商期间若残留污染候选,ICE 会选 vmrack(半通:单方向可达)→ SSH 秒级退化。判据:homesfy 日志 endpoint 又变 <PROXY_VPS> + 握手 10s+;两端 process 规则齐了之后自然恢复直连
-验证:端点变真实公网 IP(<HOME_SRV>/<CLIENT_WAN>)、隧道 RTT 350→44ms、SSH 4.5s→0.7s。
-备注:被污染的候选常混入正常候选(真实 IP 也出现),端点地址在两者间轮换是污染特征;ddvps 之类 VPS peer 的后台保活 flap 与数据路径无关,勿混淆。
+-验证:端点变真实公网 IP(<HOME_SRV>/<CLIENT_WAN>)、隧道 RTT 350→44ms、SSH 4.5s→0.7s。
+-备注:被污染的候选常混入正常候选(真实 IP 也出现),端点地址在两者间轮换是污染特征;ddvps 之类 VPS peer 的后台保活 flap 与数据路径无关,勿混淆。
+- **自动注入已上线(sing-box 7a18ad7ff,2026-08-12)**:集成层启动时自动注入 `process_path[os.Executable()]→direct` + `netbird.io/<MGMT_DOMAIN>→direct` + 控制面 DNS 直连,幂等去重且兼容手写规则,kernel-TUN 模式同样注入(控制面仍走 sing-box TUN)。重装/重启不丢,新部署无需再手改 route.rules/dns.rules;旧版仍按上文手改。
 
 ## 6. 服务器侧佐证(<ACLOUD>)
 - **服务端重启后 STUN/中继全挂 = GeoLite2 下载卡死启动**:启动时 autoUpdate 会先访问 `pkgs.netbird.io`(又一处 netbird.io 依赖!)查最新版本号再下载 mmdb,从中国网络 http=000 超时 → 整个服务卡在 init,STUN socket 建了但不应答(响应卡 tx_queue)。修复:config.yaml 加 `disableGeoliteUpdate: true`(直接用本地 GeoLite2-City_*.mmdb,不联网);`disableAnonymousMetrics: true` 关掉 ingest.netbird.io 遥测。判据:日志出现 "Relay WebSocket handler added" + "STUN server listening on [::]:3478" + UDP 3478 binding 有响应 = 启动完成
-- **不要配外部 `stuns:`**:会禁用本地 STUN 监听(`createSTUNListeners` 只在 `Relay.Stun.Enabled` 时起 3478 监听),stunPorts 本地模式会自动下发 `stun:<exposedHost>:3478` 给客户端
+|- **外部 `stuns:` 与本地 STUN 监听已解耦(v0.76.3+my_custom_server 分支,2026-08-12 上线)**:上游缺陷是 `applyRelayDefaults` 的 `!hasExternalStuns &&` 条件——配外部 stuns 就禁用本地 3478 监听;现本地监听仅由 stunPorts 驱动,外部 stuns 可并存(客户端同时下发两者,URI 去重)。旧版(0.69 镜像)仍受此缺陷约束,配外部 stuns 前先确认版本
 - store.db `peers` 表:peer IP/connected/来源公网 IP
 - `proxies` 表 0 节点 = Expose 不可用(需 proxy 节点 + peer_expose_enabled + 组)
 - `records`/`zones` 自定义 DNS:zone 按 distribution_groups 分发,server-g 拿不到 client-g 的 zone → 公网 DNS 解析失败
 - setup key 离线构造:明文大写 UUID,库中存 SHA256+base64;one-off usage_limit=1,reusable 可复用
+
+### 服务端部署形态(2026-08-12 起,docker 容器已停)
+- **systemd 直部署**:`/usr/local/bin/netbird-server -c ~/servers/netbird/config.yaml`(unit: netbird-server.service,User=ecs-user,Restart=always)
+- config.yaml 三处与容器时代不同:`listenAddress: :8081`(Caddy 反代 127.0.0.1:8081 不变)、`trustedHTTPProxies: [127.0.0.1]`(原 docker 网关)、`dataDir: ~/servers/netbird/data`(docker volume 数据已复制出来;store.db/events.db/idp.db/geonames/mmdb)
+- 分支 `my_custom_server`(netbird 仓库,基于 v0.76.3):stuns 解耦补丁 + version 子命令;版本查询 `netbird-server version`(输出 Upstream tag/Commit/Built/BuiltBy;上游 combined 无 version 命令是设计,此为本分支新增)
+- 编译链(homesfy):go 1.23.2 + GOTOOLCHAIN=auto 自动拉 1.25.12 + GOPROXY=goproxy.cn + gcc 11.4 真 cgo sqlite。**Windows 本机不可编**:无 gcc,CGO_ENABLED=0 时 mattn/go-sqlite3 链接 stub 假编译(运行时 requires cgo)
+  ldflags:`-X github.com/netbirdio/netbird/version.version=<tag> -X github.com/netbirdio/netbird/combined/cmd.commit=<hash> -X github.com/netbirdio/netbird/combined/cmd.date=<RFC3339> -X github.com/netbirdio/netbird/combined/cmd.builtBy=<name>`
+- **回滚**:`systemctl stop netbird-server && cd ~/servers/netbird && docker compose up -d`(0.69 官方镜像 + docker volume 数据原样,秒回)
+- 迁移预演法(先于正式切换):停容器→`docker cp netbird-server:/var/lib/netbird`→tar→homesfy 解压+改端口试启动→日志确认 migration + `single account mode enabled, accounts number 1`→通过才切
