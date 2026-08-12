@@ -99,18 +99,7 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	// Start configured overlay→local TCP bridges (expose_ports).
 	// These must come after the engine + sync are up: BridgeTCP calls
 	// client.ListenTCP which needs a running engine with a netstack.
-	if len(cfg.ExposePorts) > 0 {
-		log.Infof("netbird: starting %d configured bridge(s)", len(cfg.ExposePorts))
-		for _, ep := range cfg.ExposePorts {
-			if ep.Port <= 0 || ep.Port > 65535 || ep.Target == "" {
-				log.Warnf("netbird: skipping invalid expose port config: %+v", ep)
-				continue
-			}
-			if _, err := BridgeTCP(ep.Port, ep.Target); err != nil {
-				log.Warnf("netbird: bridge :%d → %s failed: %v", ep.Port, ep.Target, err)
-			}
-		}
-	}
+	startBridges(cfg.ExposePorts)
 
 	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains, networkCIDR, cfg.ManagementURL, cfg.PackageName)
 	if err != nil {
@@ -121,7 +110,66 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 		result.ModifiedConfig = modified
 	}
 	result.Engine = engine
+
+	// Watch the system default route and restart the engine on network
+	// switches (WiFi ↔ hotspot ↔ WiFi, VPN toggle). The embedded engine's
+	// own network monitor is skipped in netstack mode, so without this the
+	// ICE candidates go stale and the tunnel silently falls back to relay.
+	// Android is excluded: the OS/VpnService manages network lifecycle there.
+	if runtime.GOOS != "android" {
+		go watchNetworkChanges(engine)
+	}
 	return result, nil
+}
+
+// startBridges creates the configured overlay→local TCP forwards. Bridges
+// depend on a running engine with a netstack (client.ListenTCP).
+func startBridges(ports []ExposePortConfig) {
+	if len(ports) == 0 {
+		return
+	}
+	log.Infof("netbird: starting %d configured bridge(s)", len(ports))
+	for _, ep := range ports {
+		if ep.Port <= 0 || ep.Port > 65535 || ep.Target == "" {
+			log.Warnf("netbird: skipping invalid expose port config: %+v", ep)
+			continue
+		}
+		if _, err := BridgeTCP(ep.Port, ep.Target); err != nil {
+			log.Warnf("netbird: bridge :%d → %s failed: %v", ep.Port, ep.Target, err)
+		}
+	}
+}
+
+// restartOnNetworkChange restarts the engine and re-syncs after the system
+// default route changed. Called by watchNetworkChanges. The old client's
+// ICE candidates / bridges died with it; re-creating them restores P2P
+// (and the expose_ports bridges) without a full app restart.
+func (e *Engine) restartOnNetworkChange() {
+	if !e.IsRunning() {
+		return
+	}
+	log.Info("netbird: restarting engine after network change")
+	if err := e.Stop(); err != nil {
+		log.Warn("netbird: stop before restart: ", err)
+	}
+	if err := e.Start(); err != nil {
+		log.Warn("netbird: engine restart failed: ", err)
+		return
+	}
+	if c := e.GetClient(); c != nil {
+		SetClient(c)
+		syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		resp, err := WaitSyncResponse(syncCtx, c)
+		syncCancel()
+		if err != nil {
+			log.Warn("netbird: re-sync after restart: ", err)
+		} else if !IsKernelMode() {
+			SetDNSAddr(ComputeDNSAddr(ExtractNetworkCIDR(resp)))
+		}
+	}
+	// Overlay→local bridges died with the old client; recreate them.
+	startBridges(e.cfg.ExposePorts)
+	log.Info("netbird: engine restarted after network change")
 }
 
 // Engine wraps the netbird embed client.
