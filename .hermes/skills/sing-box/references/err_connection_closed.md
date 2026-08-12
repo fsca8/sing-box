@@ -5,7 +5,7 @@
 ### 环境
 - sing-box 1.13.14 Windows 客户端
 - VLESS+Reality+uTLS (TCP only)
-- 代理服务器：154.51.40.245:12399 (纯 IPv4)
+- 代理服务器：<PROXY_VPS>:12399 (纯 IPv4)
 - TUN 模式，`stack: mixed`
 
 ### 症状
@@ -29,7 +29,7 @@ ERROR connection upload closed: raw-read tcp4 172.19.0.1:52757->172.19.0.2:10018
 
 **错误 3 — IPv6 目标连接超时**（TUN 有 IPv6 地址，DNS 返回 AAAA 记录优先）：
 ```
-ERROR open connection to [240e:e9:6003:211::f0]:443 using outbound/vless[proxy]: dial tcp 154.51.40.245:12399: i/o timeout
+ERROR open connection to [240e:e9:6003:211::f0]:443 using outbound/vless[proxy]: dial tcp <PROXY_VPS>:12399: i/o timeout
 ```
 
 ### 修复后的正常日志

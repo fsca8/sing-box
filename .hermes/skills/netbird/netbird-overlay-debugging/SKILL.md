@@ -56,7 +56,24 @@ ICE 日志判读:
 - `wgProxy for relay connection: 127.1.x.x` = relay 代理(netbird 虚拟地址)
 - `first wg handshake detected within: 0.00sec` = WG 握手成功(P2P 通)
 
-## 6. 服务器侧佐证(47.120.70.32)
+## 6.5 候选污染:引擎流量被代理规则送走 → "假 P2P 实中继"(2026-08-11 实测修复)
+症状:SSH 建连 4~5s、隧道内 ping RTT ~350ms,和 frp 中转"差不多"(实测更慢 5 倍)。
+根因链:netbird 引擎的 UDP(51820/STUN/ICE 探测)进自己 sing-box TUN → route 规则 `geosite-!cn → proxy` 把 STUN 探测送进 vless → srflx 候选 = **代理出口 IP**(vmrack <PROXY_VPS>)而非真实公网 IP → ICE 端点错误打洞必失败 → 回落 TURN 中继(acloud:3478),中继路径 RTT 350ms(腿程才 43ms)。
+判读:
+- 引擎日志 `configure WireGuard endpoint to: <代理出口IP>` = 候选污染(正确应为对端真实公网 IP)
+- 灌流量看 Clash API 字节计数:涨在 `<ACLOUD>:3478`(TURN 中继)而非对端公网 IP = 数据走中继
+- **netbird 客户端内置默认 STUN=stun.netbird.io:3478,服务端 config.yaml 不配 turnConfig/stuns 就永远用它**(自建服务端也一样,不是"没用 netbird.io"就豁免)
+修复(两端):
+- route.rules 在 `geosite-geolocation-!cn→proxy` **之前**加引擎直连:Linux 用 `process_path→direct`(独立进程 sing-netbird);Windows 引擎嵌 sing-box.exe 用域名规则 `netbird.io/<MGMT_DOMAIN>→direct`
+- **域名规则有漏洞**:引擎用自带 DNS 解析出 IP 后直接按 IP 建连(无域名上下文),`domain_suffix` 规则匹配不到 → 又掉进 proxy → vmrack 候选死灰复燃。**Windows 必须也上 `process_path: [<SINGBIRD_APP_DIR>\sing-box.exe] → direct`**(只命中引擎的 TUN 自环 socket;sing-box 自己的 vless/DNS 拨号旁路 TUN 不受影响,普通 app 流量源进程不同也不受影响——process 规则匹配源进程,不破坏分流)
+- dns.rules 加 `<MGMT_DOMAIN>/netbird.io→dns-direct`(默认 final=dns-remote 过代理,控制面 DNS 200~430ms→58ms)
+- **peer 公网 IP 变动(运营商重拨/CGNAT 换 IP)后**:P2P 重新协商期间若残留污染候选,ICE 会选 vmrack(半通:单方向可达)→ SSH 秒级退化。判据:homesfy 日志 endpoint 又变 <PROXY_VPS> + 握手 10s+;两端 process 规则齐了之后自然恢复直连
+验证:端点变真实公网 IP(<HOME_SRV>/<CLIENT_WAN>)、隧道 RTT 350→44ms、SSH 4.5s→0.7s。
+备注:被污染的候选常混入正常候选(真实 IP 也出现),端点地址在两者间轮换是污染特征;ddvps 之类 VPS peer 的后台保活 flap 与数据路径无关,勿混淆。
+
+## 6. 服务器侧佐证(<ACLOUD>)
+- **服务端重启后 STUN/中继全挂 = GeoLite2 下载卡死启动**:启动时 autoUpdate 会先访问 `pkgs.netbird.io`(又一处 netbird.io 依赖!)查最新版本号再下载 mmdb,从中国网络 http=000 超时 → 整个服务卡在 init,STUN socket 建了但不应答(响应卡 tx_queue)。修复:config.yaml 加 `disableGeoliteUpdate: true`(直接用本地 GeoLite2-City_*.mmdb,不联网);`disableAnonymousMetrics: true` 关掉 ingest.netbird.io 遥测。判据:日志出现 "Relay WebSocket handler added" + "STUN server listening on [::]:3478" + UDP 3478 binding 有响应 = 启动完成
+- **不要配外部 `stuns:`**:会禁用本地 STUN 监听(`createSTUNListeners` 只在 `Relay.Stun.Enabled` 时起 3478 监听),stunPorts 本地模式会自动下发 `stun:<exposedHost>:3478` 给客户端
 - store.db `peers` 表:peer IP/connected/来源公网 IP
 - `proxies` 表 0 节点 = Expose 不可用(需 proxy 节点 + peer_expose_enabled + 组)
 - `records`/`zones` 自定义 DNS:zone 按 distribution_groups 分发,server-g 拿不到 client-g 的 zone → 公网 DNS 解析失败

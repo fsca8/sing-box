@@ -37,7 +37,7 @@ monitor.db 的 connection_records 表有 `error` 列(空=成功, 非空=失败�
 
 ## 3. 案例: RustDesk 21114 持续 i/o timeout(2026-08-10)
 
-- 现象: 58 条 `dial tcp 47.120.70.32:21114: i/o timeout`, 20-30s 规律重试, ~22 分钟后自动停止; 同 IP 21116 62 次全通
+- 现象: 58 条 `dial tcp <ACLOUD>:21114: i/o timeout`, 20-30s 规律重试, ~22 分钟后自动停止; 同 IP 21116 62 次全通
 - 归因: 同 IP 同出站, 单端口挂 → 服务端问题; 代理 163 次 0 错误 → 排除 singbird
 - 服务器验证: 标准 rustdesk/rustdesk-server hbbs/hbbr 只监听 21115-21119, **21114 是 API 服务器端口(OSS 版不部署)**; ufw 只放行 21115-21119; tcpdump 21114 SYN 进无 SYN-ACK
 - 根因: 客户端配置 ID 服务器带了 :21114 端口(或新版客户端 API 探测)→ 连不存在的端口 → 超时重试。**核心功能(注册/穿透/中继)实际正常**
