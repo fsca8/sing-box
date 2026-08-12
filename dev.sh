@@ -116,6 +116,12 @@ if [ "$WITH_NETBIRD" = true ]; then
     echo "  netbird version: ${NETBIRD_VERSION} (exact-match, commit ${NETBIRD_COMMIT})"
 fi
 
+# Real build time for About. Without injection SingBoxBuildTime() falls back
+# to the VCS commit time embedded by Go (the commit timestamp, not the build
+# time). Injected on both the binary and the libbox (Android) builds.
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+LD_VERSION="${LD_VERSION} -X 'github.com/sagernet/sing-box/experimental/libbox.singBoxBuildTime=${BUILD_TIME}'"
+
 if [ "$BUILD_MODE" = "release" ]; then
     LDFLAGS_SHARED="${LD_VERSION} -s -w -buildid="
     echo "→ Release build: ${VERSION}"
