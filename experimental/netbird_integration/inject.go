@@ -37,6 +37,11 @@ func SetKernelMode(v bool) { kernelMode = v }
 // back to the netbird default 100.121.0.0/16.
 // mgmtURL is the netbird management URL (netbird-config.json management_url);
 // its host — together with netbird.io — feeds the engine-traffic bypass rules.
+// androidPackageName, when non-empty, switches the engine bypass from
+// process_path (Windows/Linux) to package_name (Android): the Android
+// process searcher only resolves socket UID → package names, never process
+// paths, so a process_path rule can never match there. Every engine socket
+// is owned by the app UID, so one package_name rule covers all of them.
 //
 // Engine-traffic bypass (BOTH kernel-TUN and userspace paths): the netbird
 // engine's own sockets (STUN / management / relay / TURN / wg probes) are
@@ -56,7 +61,7 @@ func SetKernelMode(v bool) { kernelMode = v }
 //          DNS must not go through dns-remote → proxy: 200-430ms → 58ms)
 // All injections are idempotent: matching rules already present in the config
 // (e.g. hand-edited) are kept and not duplicated.
-func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR string, mgmtURL string) ([]byte, error) {
+func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR string, mgmtURL string, androidPackageName string) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(rawData, &raw); err != nil {
 		return nil, err
@@ -112,7 +117,16 @@ func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR strin
 
 	// Engine-traffic bypass — prepended so it always wins over proxy rules.
 	prepended := []any{}
-	if exe, err := os.Executable(); err == nil && exe != "" {
+	if androidPackageName != "" {
+		// Android: no process-path lookup; match the embedding app's own
+		// package (all engine sockets are owned by the app UID).
+		if !hasPackageNameRule(cleaned, androidPackageName) {
+			prepended = append(prepended, map[string]any{
+				"package_name": []string{androidPackageName},
+				"outbound":     "direct",
+			})
+		}
+	} else if exe, err := os.Executable(); err == nil && exe != "" {
 		if !hasProcessPathRule(cleaned, exe) {
 			prepended = append(prepended, map[string]any{
 				"process_path": []string{exe},
@@ -212,6 +226,27 @@ func hasProcessPathRule(rules []any, exe string) bool {
 		}
 		for _, p := range pp {
 			if strings.EqualFold(fmt.Sprint(p), exe) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasPackageNameRule reports whether rules already contain a package_name
+// rule matching the given Android app package.
+func hasPackageNameRule(rules []any, pkg string) bool {
+	for _, r := range rules {
+		rule, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		pn, ok := rule["package_name"].([]any)
+		if !ok {
+			continue
+		}
+		for _, p := range pn {
+			if fmt.Sprint(p) == pkg {
 				return true
 			}
 		}
