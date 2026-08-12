@@ -42,6 +42,13 @@ func SetKernelMode(v bool) { kernelMode = v }
 // process searcher only resolves socket UID → package names, never process
 // paths, so a process_path rule can never match there. Every engine socket
 // is owned by the app UID, so one package_name rule covers all of them.
+// ctlIPs are the engine's control-plane server IPs (management/STUN/TURN/
+// relay hosts, resolved from mgmtURL by the caller). They get an explicit
+// ip_cidr → direct rule: remote rule-sets (geoip/geosite) are downloaded
+// asynchronously and may not be loaded when the engine performs its first
+// STUN probes at startup — without an explicit IP rule those probes fall
+// through to `final` (usually the proxy) and the srflx candidate comes back
+// poisoned with the proxy exit IP, breaking P2P until a restart.
 //
 // Engine-traffic bypass (BOTH kernel-TUN and userspace paths): the netbird
 // engine's own sockets (STUN / management / relay / TURN / wg probes) are
@@ -61,7 +68,7 @@ func SetKernelMode(v bool) { kernelMode = v }
 //          DNS must not go through dns-remote → proxy: 200-430ms → 58ms)
 // All injections are idempotent: matching rules already present in the config
 // (e.g. hand-edited) are kept and not duplicated.
-func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR string, mgmtURL string, androidPackageName string) ([]byte, error) {
+func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR string, mgmtURL string, androidPackageName string, ctlIPs []string) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(rawData, &raw); err != nil {
 		return nil, err
@@ -117,6 +124,15 @@ func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR strin
 
 	// Engine-traffic bypass — prepended so it always wins over proxy rules.
 	prepended := []any{}
+	// Control-plane IPs → direct. Must not depend on geoip/geosite rule-sets:
+	// they load asynchronously and are often not ready when the engine does
+	// its first STUN probes (StartAll runs before sing-box is created).
+	if len(ctlIPs) > 0 && !hasIPDirectRule(cleaned, ctlIPs) {
+		prepended = append(prepended, map[string]any{
+			"ip_cidr":  ctlIPs,
+			"outbound": "direct",
+		})
+	}
 	if androidPackageName != "" {
 		// Android: no process-path lookup; match the embedding app's own
 		// package (all engine sockets are owned by the app UID).
@@ -249,6 +265,28 @@ func hasPackageNameRule(rules []any, pkg string) bool {
 			if fmt.Sprint(p) == pkg {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// hasIPDirectRule reports whether rules already contain an ip_cidr rule with
+// outbound "direct" covering all of the given IPs.
+func hasIPDirectRule(rules []any, ips []string) bool {
+	for _, r := range rules {
+		rule, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if fmt.Sprint(rule["outbound"]) != "direct" {
+			continue
+		}
+		cidrs, ok := rule["ip_cidr"].([]any)
+		if !ok {
+			continue
+		}
+		if containsAll(cidrs, ips) {
+			return true
 		}
 	}
 	return false
