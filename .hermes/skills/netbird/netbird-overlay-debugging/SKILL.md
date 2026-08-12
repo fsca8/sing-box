@@ -71,6 +71,7 @@ ICE 日志判读:
 -验证:端点变真实公网 IP(<HOME_SRV>/<CLIENT_WAN>)、隧道 RTT 350→44ms、SSH 4.5s→0.7s。
 -备注:被污染的候选常混入正常候选(真实 IP 也出现),端点地址在两者间轮换是污染特征;ddvps 之类 VPS peer 的后台保活 flap 与数据路径无关,勿混淆。
 - **自动注入已上线(sing-box 7a18ad7ff,2026-08-12)**:集成层启动时自动注入 `process_path[os.Executable()]→direct` + `netbird.io/<MGMT_DOMAIN>→direct` + 控制面 DNS 直连,幂等去重且兼容手写规则,kernel-TUN 模式同样注入(控制面仍走 sing-box TUN)。重装/重启不丢,新部署无需再手改 route.rules/dns.rules;旧版仍按上文手改。
+- **Android 用 package_name 而非 process_path(sing-box 6a8d4b760,2026-08-12)**:Android 进程 searcher(searcher_android.go)只解析 socket UID→包名,**无进程路径**——process_path 规则在 Android 永不匹配。修复:Config 加 `package_name` 字段(netbird-config.json,Flutter Android 侧写入 app 包名),集成层注入 `{package_name:[app包名]→direct}` 替代 process_path(app 内所有引擎 socket owner=app UID,一条规则全覆盖)。链路已确认完整:route/network.go:179 tun.NewPackageManager→router.go:180→searcher_android(netlink inet_diag)→包名,不依赖外部注入
 
 ## 6. 服务器侧佐证(<ACLOUD>)
 - **服务端重启后 STUN/中继全挂 = GeoLite2 下载卡死启动**:启动时 autoUpdate 会先访问 `pkgs.netbird.io`(又一处 netbird.io 依赖!)查最新版本号再下载 mmdb,从中国网络 http=000 超时 → 整个服务卡在 init,STUN socket 建了但不应答(响应卡 tx_queue)。修复:config.yaml 加 `disableGeoliteUpdate: true`(直接用本地 GeoLite2-City_*.mmdb,不联网);`disableAnonymousMetrics: true` 关掉 ingest.netbird.io 遥测。判据:日志出现 "Relay WebSocket handler added" + "STUN server listening on [::]:3478" + UDP 3478 binding 有响应 = 启动完成
