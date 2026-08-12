@@ -53,7 +53,7 @@ func TestInjectBypassUserspace(t *testing.T) {
 	defer SetKernelMode(false)
 	exe, _ := os.Executable()
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", "")
+	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestInjectKernelMode(t *testing.T) {
 	SetKernelMode(true)
 	defer SetKernelMode(false)
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), []string{"svc.example.net"}, "100.121.0.0/16", "", "")
+	out, err := InjectNetbirdJSON([]byte(testConfig), []string{"svc.example.net"}, "100.121.0.0/16", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,11 +202,11 @@ func TestInjectIdempotent(t *testing.T) {
 	SetKernelMode(false)
 	defer SetKernelMode(false)
 
-	first, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", "")
+	first, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := InjectNetbirdJSON(first, nil, "", "https://nb.example.wang", "")
+	second, err := InjectNetbirdJSON(first, nil, "", "https://nb.example.wang", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestInjectExistingManualRulesNotDuplicated(t *testing.T) {
 	  ]},
 	  "dns": {"rules": [{"domain_suffix": ["netbird.io", "nb.example.wang"], "server": "dns-direct"}]}
 	}`
-	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "https://nb.example.wang", "")
+	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "https://nb.example.wang", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestInjectStaleOverlayCleaned(t *testing.T) {
 	  {"ip_cidr": ["100.121.0.0/16"], "outbound": "nb-out"},
 	  {"rule_set": "geosite-!cn", "outbound": "proxy"}
 	]}, "dns": {}}`
-	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "", "")
+	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestInjectAndroidPackageName(t *testing.T) {
 	const pkg = "io.nekohasekai.sfm.singbird"
 
 	// Android: package_name bypass replaces process_path (no path lookup).
-	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", pkg)
+	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", pkg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestInjectAndroidPackageName(t *testing.T) {
 	}
 
 	// Idempotent: re-injecting must not duplicate the package rule.
-	second, err := InjectNetbirdJSON(out, nil, "", "https://nb.example.wang", pkg)
+	second, err := InjectNetbirdJSON(out, nil, "", "https://nb.example.wang", pkg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,5 +361,52 @@ func TestInjectAndroidPackageName(t *testing.T) {
 	}
 	if pkgCount != 1 {
 		t.Fatalf("package_name rules = %d, want 1 (idempotent)", pkgCount)
+	}
+}
+
+func TestInjectControlPlaneIPs(t *testing.T) {
+	SetKernelMode(false)
+	defer SetKernelMode(false)
+	ctlIPs := []string{"47.120.70.32/32", "1.2.3.4/32"}
+
+	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", "", ctlIPs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, _ := ruleList(t, out)
+
+	found := false
+	for _, r := range route {
+		m := r.(map[string]any)
+		if m["outbound"] == "direct" {
+			if cidrs, ok := m["ip_cidr"].([]any); ok {
+				s := fmt.Sprint(cidrs)
+				if s == fmt.Sprint([]any{"47.120.70.32/32", "1.2.3.4/32"}) {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no control-plane ip_cidr → direct rule injected")
+	}
+
+	// Idempotent: same IPs must not duplicate the rule.
+	second, err := InjectNetbirdJSON(out, nil, "", "https://nb.example.wang", "", ctlIPs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route2, _ := ruleList(t, second)
+	count := 0
+	for _, r := range route2 {
+		m := r.(map[string]any)
+		if cidrs, ok := m["ip_cidr"].([]any); ok {
+			if fmt.Sprint(cidrs) == fmt.Sprint([]any{"47.120.70.32/32", "1.2.3.4/32"}) {
+				count++
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("control-plane ip_cidr rules = %d, want 1 (idempotent)", count)
 	}
 }

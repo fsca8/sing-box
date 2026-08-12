@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -101,7 +103,20 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	// client.ListenTCP which needs a running engine with a netstack.
 	startBridges(cfg.ExposePorts)
 
-	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains, networkCIDR, cfg.ManagementURL, cfg.PackageName)
+	// Control-plane IPs → direct: resolve the management host so the engine's
+	// first STUN/TURN/relay probes are never routed through the proxy even
+	// before remote rule-sets finish loading (see InjectNetbirdJSON).
+	var ctlIPs []string
+	if u, err := url.Parse(cfg.ManagementURL); err == nil && u.Hostname() != "" {
+		if addrs, err := net.LookupIP(u.Hostname()); err == nil {
+			for _, a := range addrs {
+				if ip4 := a.To4(); ip4 != nil {
+					ctlIPs = append(ctlIPs, ip4.String()+"/32")
+				}
+			}
+		}
+	}
+	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains, networkCIDR, cfg.ManagementURL, cfg.PackageName, ctlIPs)
 	if err != nil {
 		// Non-fatal: sing-box still runs, just without netbird rules
 		log.Warn("inject netbird config: ", err)
