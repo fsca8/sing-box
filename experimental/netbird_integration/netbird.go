@@ -116,6 +116,7 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 			}
 		}
 	}
+	log.Infof("netbird: control-plane IPs -> direct: %v", ctlIPs)
 	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains, networkCIDR, cfg.ManagementURL, cfg.PackageName, ctlIPs)
 	if err != nil {
 		// Non-fatal: sing-box still runs, just without netbird rules
