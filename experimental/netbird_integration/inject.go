@@ -36,11 +36,6 @@ func SetKernelMode(v bool) { kernelMode = v }
 // back to the netbird default 100.121.0.0/16.
 // mgmtURL is the netbird management URL (netbird-config.json management_url);
 // its host — together with netbird.io — feeds the engine-traffic bypass rules.
-// androidPackageName, when non-empty, switches the engine bypass from
-// process_path (Windows/Linux) to package_name (Android): the Android
-// process searcher only resolves socket UID → package names, never process
-// paths, so a process_path rule can never match there. Every engine socket
-// is owned by the app UID, so one package_name rule covers all of them.
 // ctlIPs are the engine's control-plane server IPs (management/STUN/TURN/
 // relay hosts, resolved from mgmtURL by the caller). They get an explicit
 // ip_cidr → direct rule: remote rule-sets (geoip/geosite) are downloaded
@@ -67,7 +62,7 @@ func SetKernelMode(v bool) { kernelMode = v }
 //          DNS must not go through dns-remote → proxy: 200-430ms → 58ms)
 // All injections are idempotent: matching rules already present in the config
 // (e.g. hand-edited) are kept and not duplicated.
-func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR string, mgmtURL string, androidPackageName string, ctlIPs []string) ([]byte, error) {
+func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR string, mgmtURL string, ctlIPs []string) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(rawData, &raw); err != nil {
 		return nil, err
@@ -131,17 +126,6 @@ func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR strin
 			"ip_cidr":  ctlIPs,
 			"outbound": "direct",
 		})
-	}
-	if androidPackageName != "" {
-		// Android: no process-path lookup; match the embedding app's own
-		// package (all engine sockets are owned by the app UID).
-		// TODO: 阶段3 VpnService.protect 落地验证后此 package_name 规则可移除。
-		if !hasPackageNameRule(cleaned, androidPackageName) {
-			prepended = append(prepended, map[string]any{
-				"package_name": []string{androidPackageName},
-				"outbound":     "direct",
-			})
-		}
 	}
 	if !hasDomainDirectRule(cleaned, ctlDomains) {
 		prepended = append(prepended, map[string]any{
@@ -216,48 +200,6 @@ func hasServerTag(items []any, tag string) bool {
 		}
 		if fmt.Sprint(m["tag"]) == tag {
 			return true
-		}
-	}
-	return false
-}
-
-// hasProcessPathRule reports whether rules already contain a process_path rule
-// matching exe (case-insensitive — Windows paths are case-insensitive).
-func hasProcessPathRule(rules []any, exe string) bool {
-	for _, r := range rules {
-		rule, ok := r.(map[string]any)
-		if !ok {
-			continue
-		}
-		pp, ok := rule["process_path"].([]any)
-		if !ok {
-			continue
-		}
-		for _, p := range pp {
-			if strings.EqualFold(fmt.Sprint(p), exe) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// hasPackageNameRule reports whether rules already contain a package_name
-// rule matching the given Android app package.
-func hasPackageNameRule(rules []any, pkg string) bool {
-	for _, r := range rules {
-		rule, ok := r.(map[string]any)
-		if !ok {
-			continue
-		}
-		pn, ok := rule["package_name"].([]any)
-		if !ok {
-			continue
-		}
-		for _, p := range pn {
-			if fmt.Sprint(p) == pkg {
-				return true
-			}
 		}
 	}
 	return false
