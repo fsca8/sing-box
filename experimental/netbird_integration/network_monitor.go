@@ -65,11 +65,13 @@ func addrsSnapshot() string {
 		if ifc.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-		// Exclude the engines' own virtual adapters: sing-box TUN (singtun)
-		// and netbird kernel TUN (wt0, Linux). Their creation/flapping is
-		// not a physical network change and would otherwise trigger a
-		// spurious engine restart right after startup.
-		if strings.HasPrefix(ifc.Name, "singtun") || strings.HasPrefix(ifc.Name, "wt0") {
+		// Exclude the engines' own virtual adapters: sing-box TUN (singtun,
+		// tun0 on Android via VpnService) and netbird kernel TUN (wt0, Linux).
+		// Their creation/flapping is not a physical network change and would
+		// otherwise trigger a spurious engine restart right after startup.
+		if strings.HasPrefix(ifc.Name, "singtun") ||
+			strings.HasPrefix(ifc.Name, "wt0") ||
+			strings.HasPrefix(ifc.Name, "tun0") {
 			continue
 		}
 		addrs, err := ifc.Addrs()
