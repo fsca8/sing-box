@@ -356,7 +356,9 @@ func TestInjectDNSFallback(t *testing.T) {
 	defer SetKernelMode(false)
 
 	// Profile with dns-remote server + geosite-geolocation-!cn rule-set:
-	// final → nb (custom-domain fallback), non-CN domains stay on dns-remote.
+	// final must stay untouched (no final=nb fallback — it would drag every
+	// unmatched domain through the tunnel DNS and stall up to 10s), and no
+	// geosite-!cn → dns-remote rule may be injected either.
 	cfg := `{
 	  "dns": {"servers": [
 	    {"type": "https", "tag": "dns-direct", "server": "223.5.5.5"},
@@ -372,36 +374,14 @@ func TestInjectDNSFallback(t *testing.T) {
 	var parsed map[string]any
 	json.Unmarshal(out, &parsed)
 	dns := parsed["dns"].(map[string]any)
-	if fmt.Sprint(dns["final"]) != "nb" {
-		t.Fatalf("final = %v, want nb", dns["final"])
+	if fmt.Sprint(dns["final"]) != "dns-remote" {
+		t.Fatalf("final = %v, want dns-remote untouched (no final=nb fallback)", dns["final"])
 	}
-	count := 0
 	for _, r := range dns["rules"].([]any) {
 		m := r.(map[string]any)
 		if m["server"] == "dns-remote" && m["rule_set"] == "geosite-geolocation-!cn" {
-			count++
+			t.Fatal("geosite-!cn → dns-remote rule must not be injected")
 		}
-	}
-	if count != 1 {
-		t.Fatalf("geosite-!cn → dns-remote rules = %d, want 1", count)
-	}
-
-	// Idempotent: second inject must not duplicate the rule_set rule.
-	second, err := InjectNetbirdJSON(out, nil, "", "https://nb.example.wang", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parsed2 map[string]any
-	json.Unmarshal(second, &parsed2)
-	count2 := 0
-	for _, r := range parsed2["dns"].(map[string]any)["rules"].([]any) {
-		m := r.(map[string]any)
-		if m["server"] == "dns-remote" && m["rule_set"] == "geosite-geolocation-!cn" {
-			count2++
-		}
-	}
-	if count2 != 1 {
-		t.Fatalf("geosite-!cn → dns-remote after double inject = %d, want 1", count2)
 	}
 }
 
@@ -409,9 +389,8 @@ func TestInjectDNSFallbackMinimalProfile(t *testing.T) {
 	SetKernelMode(false)
 	defer SetKernelMode(false)
 
-	// testConfig lacks a dns-remote server and a declared rule-set:
-	// final still becomes nb, but no geosite-!cn rule may be injected
-	// (referencing a missing server/rule-set would break sing-box startup).
+	// Minimal profile without final: inject must not set final at all
+	// (previously it forced final=nb which broke non-CN resolution).
 	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -419,13 +398,7 @@ func TestInjectDNSFallbackMinimalProfile(t *testing.T) {
 	var parsed map[string]any
 	json.Unmarshal(out, &parsed)
 	dns := parsed["dns"].(map[string]any)
-	if fmt.Sprint(dns["final"]) != "nb" {
-		t.Fatalf("final = %v, want nb", dns["final"])
-	}
-	for _, r := range dns["rules"].([]any) {
-		m := r.(map[string]any)
-		if m["rule_set"] == "geosite-geolocation-!cn" {
-			t.Fatal("geosite-!cn rule injected without dns-remote server or rule-set declaration")
-		}
+	if _, hasFinal := dns["final"]; hasFinal {
+		t.Fatalf("final must not be injected, got %v", dns["final"])
 	}
 }
