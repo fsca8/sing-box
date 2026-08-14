@@ -118,8 +118,9 @@ func TestInjectNetbirdJSONNetworkCIDR(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules, _ := m["route"].(map[string]any)["rules"].([]any)
-	// 首条是引擎 bypass(process_path),overlay 规则在其后
-	if _, ok := rules[0].(map[string]any)["process_path"]; !ok {
+	// 首条是引擎 bypass(direct 旁路), overlay 规则在其后
+	first, _ := rules[0].(map[string]any)
+	if first["outbound"] != "direct" {
 		t.Fatalf("first rule is not the engine bypass: %v", rules[0])
 	}
 	foundCIDR := false
