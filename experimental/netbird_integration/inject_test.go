@@ -51,7 +51,6 @@ func countRouteRules(route []any, kind string) int {
 func TestInjectBypassUserspace(t *testing.T) {
 	SetKernelMode(false)
 	defer SetKernelMode(false)
-	exe, _ := os.Executable()
 
 	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", "", nil)
 	if err != nil {
@@ -59,22 +58,10 @@ func TestInjectBypassUserspace(t *testing.T) {
 	}
 	route, _ := ruleList(t, out)
 
-	// process_path bypass = current executable, outbound direct
-	foundProc := false
-	for _, r := range route {
-		m := r.(map[string]any)
-		if pp, ok := m["process_path"].([]any); ok {
-			foundProc = true
-			if len(pp) != 1 || fmt.Sprint(pp[0]) != exe {
-				t.Fatalf("process_path = %v, want [%s]", pp, exe)
-			}
-			if m["outbound"] != "direct" {
-				t.Fatalf("process bypass outbound = %v, want direct", m["outbound"])
-			}
-		}
-	}
-	if !foundProc {
-		t.Fatal("no process_path bypass injected")
+	// process_path bypass removed: embedded-bypass (socket-level
+	// IP_UNICAST_IF/protect/fwmark) replaces the route-rule bypass.
+	if n := countRouteRules(route, "process"); n != 0 {
+		t.Fatalf("process_path rules = %d, want 0 (bypass removed)", n)
 	}
 
 	// domain bypass covers netbird.io + mgmt host
@@ -94,9 +81,16 @@ func TestInjectBypassUserspace(t *testing.T) {
 		t.Fatal("no domain bypass injected")
 	}
 
-	// bypass must be prepended before the proxy rule
-	if _, ok := route[0].(map[string]any)["process_path"]; !ok {
-		t.Fatal("process bypass not at the front of route.rules")
+	// bypass must be prepended before the proxy rule (ip_cidr ctlIPs → direct
+	// is the first injected bypass now that process_path was removed)
+	first, ok := route[0].(map[string]any)
+	if !ok || first["outbound"] != "direct" {
+		t.Fatal("bypass rule not at the front of route.rules")
+	}
+	if _, hasCIDR := first["ip_cidr"]; !hasCIDR {
+		if _, hasDom := first["domain_suffix"]; !hasDom {
+			t.Fatal("front bypass rule is neither ip_cidr nor domain_suffix")
+		}
 	}
 
 	// dns-direct rule present
@@ -148,9 +142,10 @@ func TestInjectKernelMode(t *testing.T) {
 	}
 	route, _ := ruleList(t, out)
 
-	// bypass (process rule) must be present in kernel mode too
-	if countRouteRules(route, "process") != 1 {
-		t.Fatal("kernel mode: process bypass missing")
+	// process_path bypass removed: kernel mode uses fwmark-based socket
+	// bypass (control-plane marked 0x1BD00 → main), no route rule needed.
+	if countRouteRules(route, "process") != 0 {
+		t.Fatal("kernel mode: process bypass must not be injected (removed)")
 	}
 	// overlay route rule must NOT be injected (kernel route handles it)
 	for _, r := range route {
@@ -211,8 +206,10 @@ func TestInjectIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	route, _ := ruleList(t, second)
-	if n := countRouteRules(route, "process"); n != 1 {
-		t.Fatalf("process rules after double inject = %d, want 1", n)
+	// process_path bypass was removed: embedded-bypass (socket-level
+	// IP_UNICAST_IF/protect/fwmark) makes it dead weight.
+	if n := countRouteRules(route, "process"); n != 0 {
+		t.Fatalf("process rules after double inject = %d, want 0 (process_path bypass removed)", n)
 	}
 	if n := countRouteRules(route, "domain-direct"); n != 1 {
 		t.Fatalf("domain-direct rules after double inject = %d, want 1", n)

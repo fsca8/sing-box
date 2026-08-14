@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 )
 
@@ -136,16 +135,10 @@ func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR strin
 	if androidPackageName != "" {
 		// Android: no process-path lookup; match the embedding app's own
 		// package (all engine sockets are owned by the app UID).
+		// TODO: 阶段3 VpnService.protect 落地验证后此 package_name 规则可移除。
 		if !hasPackageNameRule(cleaned, androidPackageName) {
 			prepended = append(prepended, map[string]any{
 				"package_name": []string{androidPackageName},
-				"outbound":     "direct",
-			})
-		}
-	} else if exe, err := os.Executable(); err == nil && exe != "" {
-		if !hasProcessPathRule(cleaned, exe) {
-			prepended = append(prepended, map[string]any{
-				"process_path": []string{exe},
 				"outbound":     "direct",
 			})
 		}
