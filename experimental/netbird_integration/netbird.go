@@ -27,6 +27,10 @@ type StartAllResult struct {
 	ModifiedConfig []byte
 	// Engine is the running netbird engine. nil if not started.
 	Engine *Engine
+	// EngineErr is set when the engine failed to start (non-fatal: sing-box
+	// still runs with the unmodified config). Empty when the engine was
+	// never attempted (no credentials) or started successfully.
+	EngineErr string
 	// NetworkCIDR is the account overlay CIDR from the sync response
 	// (e.g. "100.121.0.0/16"), or "" when unknown. Used by kernel-TUN mode
 	// to install the static route to wt0.
@@ -67,6 +71,7 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 		log.Warn("netbird engine failed to start: ", err)
 		SetKernelMode(false)
 		result.ModifiedConfig = singBoxConfig
+		result.EngineErr = err.Error()
 		return result, nil // non-fatal: sing-box still runs
 	}
 
@@ -131,10 +136,10 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	// switches (WiFi ↔ hotspot ↔ WiFi, VPN toggle). The embedded engine's
 	// own network monitor is skipped in netstack mode, so without this the
 	// ICE candidates go stale and the tunnel silently falls back to relay.
-	// Android is excluded: the OS/VpnService manages network lifecycle there.
-	if runtime.GOOS != "android" {
-		go watchNetworkChanges(engine)
-	}
+	// 全平台启用网络监控(含 Android): 网络变化时重启引擎, 引擎意外停止时
+	// 自动恢复。Android 的 VpnService TUN 接口名(tun0)已在 addrsSnapshot
+	// 排除列表中, 不会把引擎自身接口变化误判为物理网络变化。
+	go watchNetworkChanges(engine)
 	return result, nil
 }
 

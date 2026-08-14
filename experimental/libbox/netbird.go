@@ -55,6 +55,8 @@ func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified s
 	if result.Engine != nil {
 		netbirdEngine = result.Engine
 		writeMarker("NetbirdStartAll: engine started OK")
+	} else if result.EngineErr != "" {
+		writeMarker("NetbirdStartAll: engine failed to start: " + result.EngineErr)
 	} else {
 		writeMarker("NetbirdStartAll: no credentials, engine not started")
 	}
