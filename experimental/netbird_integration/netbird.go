@@ -117,8 +117,7 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 			}
 		}
 	}
-	log.Infof("netbird: control-plane IPs -> direct: %v", ctlIPs)
-	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains, networkCIDR, cfg.ManagementURL, cfg.PackageName, ctlIPs)
+	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains, networkCIDR, cfg.ManagementURL, ctlIPs)
 	if err != nil {
 		// Non-fatal: sing-box still runs, just without netbird rules
 		log.Warn("inject netbird config: ", err)
@@ -216,12 +215,6 @@ type Config struct {
 	// e.g. to reuse a running netbird daemon's identity during migration.
 	// Mutually exclusive with SetupKey/JWTToken.
 	PrivateKey string `json:"private_key"`
-	// PackageName is the Android app package that embeds the engine
-	// (e.g. "io.nekohasekai.sfm.singbird"). On Android the process-path
-	// lookup is unavailable (searcher_android.go only resolves UID →
-	// package names), so the engine-traffic bypass must match the app's
-	// own package instead. Empty on non-Android platforms.
-	PackageName string `json:"package_name"`
 	// ExposePorts lists overlay→local TCP port forwards. Each entry makes
 	// the netbird engine listen on the given port inside the overlay
 	// (netstack) and forward accepted connections to the local target.
