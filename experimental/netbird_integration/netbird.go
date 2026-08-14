@@ -17,6 +17,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	nbembed "github.com/netbirdio/netbird/client/embed"
+	nbnet "github.com/netbirdio/netbird/client/net"
 )
 
 // StartAllResult holds the result of StartAll.
@@ -331,6 +332,13 @@ func (e *Engine) Start() error {
 		if err := writeNetbirdProfileConfig(opts.ConfigPath); err != nil {
 			log.Warn("netbird: pre-write profile config: ", err)
 		}
+	}
+
+	// Windows: 嵌入模式下控制面 socket 的接口选择(IP_UNICAST_IF)必须排除
+	// sing-box 的 TUN(singtun), 落到物理网卡; 否则 selectInterface 会选中
+	// metric-0 的 singtun 默认路由, 旁路失效, STUN 仍被劫持。
+	if runtime.GOOS == "windows" {
+		nbnet.SetVPNInterfaceName("singtun")
 	}
 
 	client, err := nbembed.New(opts)
