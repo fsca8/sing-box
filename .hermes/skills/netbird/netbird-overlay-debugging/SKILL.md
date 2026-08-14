@@ -85,6 +85,7 @@ ICE 日志判读:
 - **systemd 直部署**:`/usr/local/bin/netbird-server -c ~/servers/netbird/config.yaml`(unit: netbird-server.service,User=ecs-user,Restart=always)
 - config.yaml 三处与容器时代不同:`listenAddress: :8081`(Caddy 反代 127.0.0.1:8081 不变)、`trustedHTTPProxies: [127.0.0.1]`(原 docker 网关)、`dataDir: ~/servers/netbird/data`(docker volume 数据已复制出来;store.db/events.db/idp.db/geonames/mmdb)
 - 分支 `my_custom_server`(netbird 仓库,基于 v0.76.3):stuns 解耦补丁 + version 子命令;版本查询 `netbird-server version`(输出 Upstream tag/Commit/Built/BuiltBy;上游 combined 无 version 命令是设计,此为本分支新增)
+- **分支基准标注(仿 sing-box)**:netbird 仓库根 `UPSTREAM_TAG` 文件记录 my_custom / my_custom_server 的共同上游基准 tag(现 `v0.76.3`);合并官方新 tag 流程 `git fetch origin && git merge <tag>`,冲突策略与 sing-box 一致(本地引擎/集成改动保留 ours,上游重构 theirs),**合并后更新 UPSTREAM_TAG**
 - 编译链(homesfy):go 1.23.2 + GOTOOLCHAIN=auto 自动拉 1.25.12 + GOPROXY=goproxy.cn + gcc 11.4 真 cgo sqlite。**Windows 本机不可编**:无 gcc,CGO_ENABLED=0 时 mattn/go-sqlite3 链接 stub 假编译(运行时 requires cgo)
   ldflags:`-X github.com/netbirdio/netbird/version.version=<tag> -X github.com/netbirdio/netbird/combined/cmd.commit=<hash> -X github.com/netbirdio/netbird/combined/cmd.date=<RFC3339> -X github.com/netbirdio/netbird/combined/cmd.builtBy=<name>`
 - **回滚**:`systemctl stop netbird-server && cd ~/servers/netbird && docker compose up -d`(0.69 官方镜像 + docker volume 数据原样,秒回)
