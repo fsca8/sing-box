@@ -187,24 +187,11 @@ func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR strin
 		dnsSection["rules"] = rules
 	}
 
-	// DNS 兜底: 未命中任何规则的域名(含 netbird 自定义域名)走 nb transport。
-	// nb transport 对未知域名返回 Refused 后自动 fallback 公网 223.5.5.5
-	// (dns_transport.go), 引擎未运行时行为等价于 dns-direct; 引擎由恢复循环
-	// 拉起后 SetClient 即复活 —— 自定义域名无需引擎启动时就注入规则。
-	// 非 CN 域名保持走 dns-remote(经代理, 防 DNS 污染): 显式 rule_set 规则
-	// 拦截, 避免被 final=nb 兜底吞掉。仅在 profile 具备 dns-remote server
-	// 与 geosite-geolocation-!cn rule_set 时注入, 否则回退现状。
-	if hasServerTag(servers, "dns-remote") && hasRuleSetTag(raw, "geosite-geolocation-!cn") &&
-		!hasRuleSetServerRule(dnsSection, "geosite-geolocation-!cn", "dns-remote") {
-		rules, _ := dnsSection["rules"].([]any)
-		dnsSection["rules"] = append(rules, map[string]any{
-			"rule_set": "geosite-geolocation-!cn",
-			"server":   "dns-remote",
-		})
-	}
-	if fmt.Sprint(dnsSection["final"]) != "nb" {
-		dnsSection["final"] = "nb"
-	}
+	// 注意: 不做 final=nb 兜底。兜底会让所有未命中规则的域名(非 CN 冷门
+	// 域名、rule_set 异步加载期间的域名)先走隧道 DNS —— 引擎在但隧道
+	// 不通时一次解析 5s 超时 + fallback 5s, 直接卡死。自定义域名靠上面的
+	// customDomains 显式规则(引擎 sync 成功后注入), 不影响其他域名。
+	// final 保持用户 profile 原样(通常 dns-remote 走代理, 快)。
 
 	return json.Marshal(raw)
 }
@@ -285,36 +272,6 @@ func hasDNSDirectRule(dnsSection map[string]any, domains []string) bool {
 			continue
 		}
 		if containsAll(ds, domains) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasRuleSetTag reports whether route.rule_set contains a rule-set with the
-// given tag (DNS rules can reference rule-sets only when they are declared).
-func hasRuleSetTag(raw map[string]any, tag string) bool {
-	routeSection, _ := raw["route"].(map[string]any)
-	ruleSets, _ := routeSection["rule_set"].([]any)
-	for _, rs := range ruleSets {
-		m, ok := rs.(map[string]any)
-		if ok && fmt.Sprint(m["tag"]) == tag {
-			return true
-		}
-	}
-	return false
-}
-
-// hasRuleSetServerRule reports whether dns.rules already contains a rule_set
-// rule routing the given rule-set to the given server tag.
-func hasRuleSetServerRule(dnsSection map[string]any, ruleSet string, server string) bool {
-	rules, _ := dnsSection["rules"].([]any)
-	for _, r := range rules {
-		rule, ok := r.(map[string]any)
-		if !ok {
-			continue
-		}
-		if fmt.Sprint(rule["server"]) == server && fmt.Sprint(rule["rule_set"]) == ruleSet {
 			return true
 		}
 	}
