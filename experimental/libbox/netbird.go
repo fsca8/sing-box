@@ -35,6 +35,17 @@ func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified s
 		writeMarker("NetbirdStartAll: set DataDir=" + sBasePath)
 	}
 
+	// 嵌入模式下 netbird 控制面 socket 需要绕过 VpnService TUN:
+	// 把 Kotlin 注入的 Protector(VpnService.protect) 桥接给 netbird 引擎。
+	if androidProtector != nil {
+		netbird_integration.SetAndroidProtectFn(func(fd int32) bool {
+			return androidProtector.Protect(fd)
+		})
+		writeMarker("NetbirdStartAll: android protect fn registered")
+	} else {
+		writeMarker("NetbirdStartAll: no android protector (netbird control-plane will use VpnService TUN)")
+	}
+
 	result, err := netbird_integration.StartAll(cfg, []byte(singBoxConfig))
 	if err != nil {
 		writeMarker("NetbirdStartAll: StartAll FAILED: " + err.Error())
