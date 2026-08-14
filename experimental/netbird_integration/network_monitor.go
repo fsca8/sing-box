@@ -29,16 +29,27 @@ func watchNetworkChanges(e *Engine) {
 	for {
 		time.Sleep(5 * time.Second)
 		cur := addrsSnapshot()
-		if cur == last {
-			continue
+		changed := cur != last
+		if changed {
+			last = cur
 		}
-		last = cur
 		if time.Since(lastRestart) < 5*time.Second {
 			continue // debounce transient flaps
 		}
 		lastRestart = time.Now()
-		log.Info("netbird: network change detected (interface addresses changed), restarting engine")
-		e.restartOnNetworkChange()
+		if !e.IsRunning() {
+			// Recovery path: the engine died (e.g. a restart failed because
+			// the network was still settling and the management dial timed
+			// out). Once the network has settled, bring it back instead of
+			// leaving the tunnel dead until a manual app restart.
+			log.Info("netbird: engine not running, attempting recovery")
+			e.restartOnNetworkChange()
+			continue
+		}
+		if changed {
+			log.Info("netbird: network change detected (interface addresses changed), restarting engine")
+			e.restartOnNetworkChange()
+		}
 	}
 }
 
@@ -52,6 +63,13 @@ func addrsSnapshot() string {
 	var parts []string
 	for _, ifc := range ifaces {
 		if ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		// Exclude the engines' own virtual adapters: sing-box TUN (singtun)
+		// and netbird kernel TUN (wt0, Linux). Their creation/flapping is
+		// not a physical network change and would otherwise trigger a
+		// spurious engine restart right after startup.
+		if strings.HasPrefix(ifc.Name, "singtun") || strings.HasPrefix(ifc.Name, "wt0") {
 			continue
 		}
 		addrs, err := ifc.Addrs()

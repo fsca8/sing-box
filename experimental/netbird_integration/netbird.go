@@ -160,18 +160,29 @@ func startBridges(ports []ExposePortConfig) {
 // default route changed. Called by watchNetworkChanges. The old client's
 // ICE candidates / bridges died with it; re-creating them restores P2P
 // (and the expose_ports bridges) without a full app restart.
+//
+// Also serves as the recovery path: when the engine is not running (e.g. a
+// previous restart failed because the network was still settling and the
+// management dial timed out), it skips Stop and goes straight to Start.
 func (e *Engine) restartOnNetworkChange() {
-	if !e.IsRunning() {
-		return
-	}
-	log.Info("netbird: restarting engine after network change")
-	if err := e.Stop(); err != nil {
-		log.Warn("netbird: stop before restart: ", err)
+	if e.IsRunning() {
+		log.Info("netbird: restarting engine after network change")
+		if err := e.Stop(); err != nil {
+			log.Warn("netbird: stop before restart: ", err)
+		}
 	}
 	if err := e.Start(); err != nil {
-		log.Warn("netbird: engine restart failed: ", err)
+		log.Warn("netbird: engine (re)start failed: ", err)
 		return
 	}
+	e.postStartSync()
+	log.Info("netbird: engine restarted after network change")
+}
+
+// postStartSync re-wires the sing-box integration after a (re)start:
+// refresh the global embed client, wait for the management sync, recompute
+// the tunnel DNS address, and recreate the overlay→local bridges.
+func (e *Engine) postStartSync() {
 	if c := e.GetClient(); c != nil {
 		SetClient(c)
 		syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -185,7 +196,6 @@ func (e *Engine) restartOnNetworkChange() {
 	}
 	// Overlay→local bridges died with the old client; recreate them.
 	startBridges(e.cfg.ExposePorts)
-	log.Info("netbird: engine restarted after network change")
 }
 
 // Engine wraps the netbird embed client.
