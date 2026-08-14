@@ -66,52 +66,14 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 
 	t0 := time.Now()
 
-	engine := NewEngine(cfg)
-	if err := engine.Start(); err != nil {
-		log.Warn("netbird engine failed to start: ", err)
-		SetKernelMode(false)
-		result.ModifiedConfig = singBoxConfig
-		result.EngineErr = err.Error()
-		return result, nil // non-fatal: sing-box still runs
-	}
-
-	var customDomains []string
-	var networkCIDR string
-	if c := engine.GetClient(); c != nil {
-		SetClient(c)
-		log.Info(fmt.Sprintf("netbird DNS resolver available (t=%.1fs)", time.Since(t0).Seconds()))
-		t1 := time.Now()
-		syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		resp, err := WaitSyncResponse(syncCtx, c)
-		syncCancel()
-		log.Info(fmt.Sprintf("netbird sync wait: %.1fs", time.Since(t1).Seconds()))
-		if err != nil {
-			log.Warn("wait for netbird sync: ", err)
-		} else {
-			customDomains = ExtractDomainsFromSync(resp)
-			networkCIDR = ExtractNetworkCIDR(resp)
-			result.NetworkCIDR = networkCIDR
-			// Compute the tunnel DNS server address from the account network
-			// (last-but-one IP of the overlay /16, e.g. 100.121.255.254:53).
-			// Without this, the netbird DNS transport has no reachable target.
-			// Netstack mode only: in kernel-TUN mode the DNS server binds the
-			// WG interface's own IP:53, set by SetupKernelRoute.
-			if !IsKernelMode() {
-				SetDNSAddr(ComputeDNSAddr(networkCIDR))
-			}
-			log.Info(fmt.Sprintf("netbird custom domains: %v, network: %s", customDomains, networkCIDR))
-		}
-	}
-	log.Info("netbird engine started")
-
-	// Start configured overlay→local TCP bridges (expose_ports).
-	// These must come after the engine + sync are up: BridgeTCP calls
-	// client.ListenTCP which needs a running engine with a netstack.
-	startBridges(cfg.ExposePorts)
-
-	// Control-plane IPs → direct: resolve the management host so the engine's
-	// first STUN/TURN/relay probes are never routed through the proxy even
-	// before remote rule-sets finish loading (see InjectNetbirdJSON).
+	// DNS 预热 + 控制面 IP 收集: 解析 mgmt 主机名。首次启动时系统 DNS
+	// 冷缓存 + IPv6 AAAA 查询挂起(i/o timeout)会让引擎的 mgmt 连接慢到
+	// 20s+, 吃掉 60s 启动预算导致首启失败; 此处提前解析, 引擎 Start 时
+	// 走热缓存(自建部署 mgmt/relay/signal 同域名, 一次预热全覆盖)。
+	// 位于 engine.Start() 之前, 不计入引擎启动超时。解析出的 IP 同时
+	// 用于注入控制面 ip_cidr → direct 规则(见 InjectNetbirdJSON)。
+	// 注: 引擎侧控制面域名解析已全部改为 IPv4-only(LookupNetIP "ip4",
+	// netbird my_custom 分支), 彻底绕开 AAAA 慢查询。
 	var ctlIPs []string
 	if u, err := url.Parse(cfg.ManagementURL); err == nil && u.Hostname() != "" {
 		if addrs, err := net.LookupIP(u.Hostname()); err == nil {
@@ -122,6 +84,63 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 			}
 		}
 	}
+
+	engine := NewEngine(cfg)
+	engineStarted := false
+	if err := engine.Start(); err != nil {
+		log.Warn("netbird engine failed to start: ", err)
+		SetKernelMode(false)
+		result.EngineErr = err.Error()
+		// 不返回: 继续注入静态骨架(nb DNS transport / nb-out / overlay CIDR
+		// / 控制面 bypass)。nb-out 与 nb DNS transport 每次拨号动态
+		// GetClient()(outbound.go / dns_transport.go), 引擎由下方
+		// watchNetworkChanges 恢复循环拉起后自动复活, 无需重启 sing-box。
+		// 引擎失败时无 sync 数据, 自定义域名解析依赖 DNS final=nb 兜底
+		// (InjectNetbirdJSON), 引擎恢复后 SetClient 即生效。
+	} else {
+		engineStarted = true
+	}
+
+	var customDomains []string
+	var networkCIDR string
+	if engineStarted {
+		if c := engine.GetClient(); c != nil {
+			SetClient(c)
+			log.Info(fmt.Sprintf("netbird DNS resolver available (t=%.1fs)", time.Since(t0).Seconds()))
+			t1 := time.Now()
+			syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			resp, err := WaitSyncResponse(syncCtx, c)
+			syncCancel()
+			log.Info(fmt.Sprintf("netbird sync wait: %.1fs", time.Since(t1).Seconds()))
+			if err != nil {
+				log.Warn("wait for netbird sync: ", err)
+			} else {
+				customDomains = ExtractDomainsFromSync(resp)
+				networkCIDR = ExtractNetworkCIDR(resp)
+				result.NetworkCIDR = networkCIDR
+				// Compute the tunnel DNS server address from the account network
+				// (last-but-one IP of the overlay /16, e.g. 100.121.255.254:53).
+				// Without this, the netbird DNS transport has no reachable target.
+				// Netstack mode only: in kernel-TUN mode the DNS server binds the
+				// WG interface's own IP:53, set by SetupKernelRoute.
+				if !IsKernelMode() {
+					SetDNSAddr(ComputeDNSAddr(networkCIDR))
+				}
+				log.Info(fmt.Sprintf("netbird custom domains: %v, network: %s", customDomains, networkCIDR))
+			}
+		}
+		log.Info("netbird engine started")
+
+		// Start configured overlay→local TCP bridges (expose_ports).
+		// These must come after the engine + sync are up: BridgeTCP calls
+		// client.ListenTCP which needs a running engine with a netstack.
+		startBridges(cfg.ExposePorts)
+	}
+
+	// Control-plane IPs → direct: resolve the management host so the engine's
+	// first STUN/TURN/relay probes are never routed through the proxy even
+	// before remote rule-sets finish loading (see InjectNetbirdJSON).
+	// ctlIPs 已在 StartAll 开头预热解析(DNS 预热), 此处仅注入。
 	modified, err := InjectNetbirdJSON(singBoxConfig, customDomains, networkCIDR, cfg.ManagementURL, ctlIPs)
 	if err != nil {
 		// Non-fatal: sing-box still runs, just without netbird rules
