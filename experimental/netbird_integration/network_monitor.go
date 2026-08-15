@@ -26,8 +26,21 @@ func watchNetworkChanges(e *Engine) {
 	log.Info("netbird: network monitor started (interface addresses, 5s poll)")
 	last := addrsSnapshot()
 	lastRestart := time.Now()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	tickCount := 0
 	for {
-		time.Sleep(5 * time.Second)
+		select {
+		case <-e.stopCh:
+			// Engine.Shutdown() closed stopCh: the host service is going
+			// away. Exit now so the recovery loop cannot resurrect the
+			// engine after teardown (leaked watcher + second engine with
+			// the same WireGuard identity = stop→start breaks netbird).
+			log.Info("netbird: network monitor stopped")
+			return
+		case <-ticker.C:
+		}
+		tickCount++
 		cur := addrsSnapshot()
 		changed := cur != last
 		if changed {
@@ -49,6 +62,12 @@ func watchNetworkChanges(e *Engine) {
 		if changed {
 			log.Info("netbird: network change detected (interface addresses changed), restarting engine")
 			e.restartOnNetworkChange()
+		}
+		// 周期性域名刷新(每 30s): 覆盖"引擎已启动但 StartAll 的 5s
+		// sync 等待超时"与"管理端新增/移除域名"的场景。refreshDomainsFile
+		// 内部按指纹去重, 内容未变不重写文件、不触发 sing-box 重载。
+		if tickCount%6 == 0 {
+			e.refreshDomainsFromSync()
 		}
 	}
 }

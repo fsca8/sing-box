@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"strings"
 )
 
 // kernelMode selects the Linux kernel-TUN data path (Route A):
@@ -24,13 +23,31 @@ func IsKernelMode() bool { return kernelMode }
 // SetKernelMode records whether the kernel-TUN data path is active.
 func SetKernelMode(v bool) { kernelMode = v }
 
+// Rule-set tags referencing the local custom-domain / overlay-CIDR files.
+// They are SEPARATE sets: the DNS rule references only the domain set — a
+// DNS-referenced rule-set carrying ip_cidr rules is rejected by sing-box 1.14
+// ("Legacy Address Filter Fields in DNS rules is deprecated", see
+// writeDomainsRuleSet). The CIDR set is referenced by route rules only.
+const customRuleSetTag = "nb-domains"
+const customCIDRRuleSetTag = "nb-cidr"
+
 // InjectNetbirdJSON adds netbird DNS server, outbound, route/rule-set entries,
 // and the engine-traffic bypass to the raw sing-box config. It returns the
 // modified JSON bytes.
 //
-// customDomains (from netbird SyncResponse) get domain-specific route and DNS
-// rules pointing to the netbird outbound/DNS server so they resolve through
-// the netbird tunnel.
+// Custom domains are NOT baked into per-domain rules: the config declares two
+// local rule-sets and route/DNS rules reference them:
+//   - nb-domains (file at ruleSetPath): domain_suffix list, referenced by the
+//     DNS rule (server nb) and the route rule (outbound nb-out)
+//   - nb-cidr (file at cidrRuleSetPath): the overlay CIDR, referenced by the
+//     route rule only (DNS rules must not reference IP-bearing sets)
+// The integration rewrites these files whenever the engine syncs; sing-box
+// reloads the rule-sets at runtime (fswatch), so domains/CIDR arriving after
+// startup (engine recovery) take effect without reloading the service. Both
+// files must exist when the config loads (StartAll writes them, possibly
+// empty/default, before returning). Empty ruleSetPath skips the rule-set
+// machinery entirely (no custom-domain rules injected).
+//
 // networkCIDR (from netbird SyncResponse, e.g. "100.121.0.0/16") is the
 // account's overlay subnet and is always routed through netbird; empty falls
 // back to the netbird default 100.121.0.0/16.
@@ -62,7 +79,7 @@ func SetKernelMode(v bool) { kernelMode = v }
 //          DNS must not go through dns-remote → proxy: 200-430ms → 58ms)
 // All injections are idempotent: matching rules already present in the config
 // (e.g. hand-edited) are kept and not duplicated.
-func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR string, mgmtURL string, ctlIPs []string) ([]byte, error) {
+func InjectNetbirdJSON(rawData []byte, networkCIDR string, mgmtURL string, ctlIPs []string, ruleSetPath string, cidrRuleSetPath string) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(rawData, &raw); err != nil {
 		return nil, err
@@ -166,25 +183,63 @@ func InjectNetbirdJSON(rawData []byte, customDomains []string, networkCIDR strin
 			"ip_cidr":  []string{nbCIDR},
 			"outbound": "nb-out",
 		})
-		// Domain-specific route rules for each custom domain
-		for _, d := range customDomains {
+		// Custom domains → nb-out via the local domain rule-set (domains live
+		// in the file, updated at runtime by the engine; see customRuleSetTag).
+		// Idempotent: skip when an existing rule (cleaned) or a just-prepended
+		// one already references the set.
+		if ruleSetPath != "" && !hasRuleSetRule(prepended, customRuleSetTag) && !hasRuleSetRule(cleaned, customRuleSetTag) {
 			prepended = append(prepended, map[string]any{
-				"domain_suffix": strings.TrimSuffix(d, "."),
-				"outbound":      "nb-out",
+				"rule_set":  customRuleSetTag,
+				"outbound": "nb-out",
+			})
+		}
+		// Overlay CIDR → nb-out via the local CIDR rule-set (real-time updates
+		// for accounts whose overlay differs from the default /16).
+		if cidrRuleSetPath != "" && !hasRuleSetRule(prepended, customCIDRRuleSetTag) && !hasRuleSetRule(cleaned, customCIDRRuleSetTag) {
+			prepended = append(prepended, map[string]any{
+				"rule_set":  customCIDRRuleSetTag,
+				"outbound": "nb-out",
+			})
+		}
+		// nb-cidr rule-set declaration — userspace only (kernel mode routes
+		// the overlay via the kernel route, no route rules at all).
+		if cidrRuleSetPath != "" && !hasRuleSetDecl(routeSection, customCIDRRuleSetTag) {
+			ruleSets, _ := routeSection["rule_set"].([]any)
+			routeSection["rule_set"] = append(ruleSets, map[string]any{
+				"type": "local",
+				"tag":  customCIDRRuleSetTag,
+				"path": cidrRuleSetPath,
 			})
 		}
 	}
 	routeSection["rules"] = append(prepended, cleaned...)
 
-	// Domain-specific DNS rules for each custom domain
-	for _, d := range customDomains {
-		clean := strings.TrimSuffix(d, ".")
-		rules, _ := dnsSection["rules"].([]any)
-		rules = append(rules, map[string]any{
-			"domain_suffix": clean,
-			"server":        "nb",
+	// Local rule-set declaration (nb-domains): route AND DNS rules resolve
+	// rule-set tags through the route.rule_set registry (box.go:
+	// router.Initialize(routeOptions.RuleSet)). Declared in both modes — the
+	// DNS custom-domain rule needs it in kernel mode too.
+	if ruleSetPath != "" && !hasRuleSetDecl(routeSection, customRuleSetTag) {
+		ruleSets, _ := routeSection["rule_set"].([]any)
+		routeSection["rule_set"] = append(ruleSets, map[string]any{
+			"type": "local",
+			"tag":  customRuleSetTag,
+			"path": ruleSetPath,
 		})
-		dnsSection["rules"] = rules
+	}
+
+	// Custom domains → nb DNS transport (both kernel-TUN and userspace: the
+	// kernel route handles overlay IPs, but domain resolution still needs the
+	// tunnel DNS). References ONLY the domain rule-set (an IP-bearing set
+	// referenced by a DNS rule is rejected by the 1.14 legacy-address-filter
+	// check).
+	if ruleSetPath != "" {
+		dnsRules, _ := dnsSection["rules"].([]any)
+		if !hasRuleSetRule(dnsRules, customRuleSetTag) {
+			dnsSection["rules"] = append(dnsRules, map[string]any{
+				"rule_set": customRuleSetTag,
+				"server":   "nb",
+			})
+		}
 	}
 
 	// 注意: 不做 final=nb 兜底。兜底会让所有未命中规则的域名(非 CN 冷门
@@ -206,6 +261,47 @@ func hasServerTag(items []any, tag string) bool {
 		}
 		if fmt.Sprint(m["tag"]) == tag {
 			return true
+		}
+	}
+	return false
+}
+
+// hasRuleSetDecl reports whether the route.rule_set section already declares
+// a rule-set with the given tag.
+func hasRuleSetDecl(routeSection map[string]any, tag string) bool {
+	ruleSets, _ := routeSection["rule_set"].([]any)
+	for _, rs := range ruleSets {
+		m, ok := rs.(map[string]any)
+		if !ok {
+			continue
+		}
+		if fmt.Sprint(m["tag"]) == tag {
+			return true
+		}
+	}
+	return false
+}
+
+// hasRuleSetRule reports whether the rule list already contains a rule whose
+// rule_set matcher references the given tag (route and DNS rules both use
+// the same `rule_set` key; the value is a Listable string or array).
+func hasRuleSetRule(rules []any, tag string) bool {
+	for _, r := range rules {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch v := m["rule_set"].(type) {
+		case string:
+			if v == tag {
+				return true
+			}
+		case []any:
+			for _, s := range v {
+				if fmt.Sprint(s) == tag {
+					return true
+				}
+			}
 		}
 	}
 	return false

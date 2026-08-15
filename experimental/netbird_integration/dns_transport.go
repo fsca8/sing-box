@@ -43,6 +43,15 @@ func GetClient() *nbembed.Client {
 	return globalClient.client
 }
 
+// ClearClient drops the global embed client reference. Called by
+// Engine.Shutdown() so nb-out / the DNS transport never dial through a
+// stopped engine after service teardown.
+func ClearClient() {
+	globalClient.mu.Lock()
+	defer globalClient.mu.Unlock()
+	globalClient.client = nil
+}
+
 // SetDNSAddr records the netbird tunnel DNS server address (host:port).
 func SetDNSAddr(addr string) {
 	globalClient.mu.Lock()

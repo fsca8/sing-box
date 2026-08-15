@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,12 @@ const testConfig = `{
     {"rule_set": "geoip-cn", "outbound": "direct"}
   ]}
 }`
+
+// testRuleSetPath / testCIDRPath are (possibly non-existent) rule-set file
+// paths used to exercise the custom-domain/CIDR rule-set injection. Injection
+// only references the paths — it never reads the files.
+var testRuleSetPath = filepath.Join(os.TempDir(), "nb-domains-test.json")
+var testCIDRPath = filepath.Join(os.TempDir(), "nb-cidr-test.json")
 
 func ruleList(t *testing.T, raw []byte) (route []any, dnsRules []any) {
 	t.Helper()
@@ -52,7 +59,7 @@ func TestInjectBypassUserspace(t *testing.T) {
 	SetKernelMode(false)
 	defer SetKernelMode(false)
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", nil)
+	out, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +143,7 @@ func TestInjectKernelMode(t *testing.T) {
 	SetKernelMode(true)
 	defer SetKernelMode(false)
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), []string{"svc.example.net"}, "100.121.0.0/16", "", nil)
+	out, err := InjectNetbirdJSON([]byte(testConfig), "100.121.0.0/16", "", nil, testRuleSetPath, testCIDRPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,17 +172,31 @@ func TestInjectKernelMode(t *testing.T) {
 			t.Fatal("kernel mode: nb-out must not be injected")
 		}
 	}
-	// custom domain DNS rule still injected
+	// custom domain DNS rule still injected (via the local rule-set, not
+	// per-domain rules — the set is declared in route.rule_set which is the
+	// registry both route and DNS rules resolve through)
 	_, dnsR := ruleList(t, out)
 	foundCustom := false
 	for _, r := range dnsR {
 		m := r.(map[string]any)
-		if m["server"] == "nb" && strings.Contains(fmt.Sprint(m["domain_suffix"]), "svc.example.net") {
+		if m["server"] == "nb" && fmt.Sprint(m["rule_set"]) == customRuleSetTag {
 			foundCustom = true
 		}
 	}
 	if !foundCustom {
-		t.Fatal("kernel mode: custom domain DNS rule missing")
+		t.Fatal("kernel mode: custom domain DNS rule (rule_set → nb) missing")
+	}
+	// the rule-set declaration must be present in route.rule_set
+	var routeCfg map[string]any
+	json.Unmarshal(out, &routeCfg)
+	declFound := false
+	for _, rs := range routeCfg["route"].(map[string]any)["rule_set"].([]any) {
+		if fmt.Sprint(rs.(map[string]any)["tag"]) == customRuleSetTag {
+			declFound = true
+		}
+	}
+	if !declFound {
+		t.Fatal("kernel mode: nb-custom-domains rule-set declaration missing")
 	}
 	// mgmtURL empty → dns-direct rule covers only netbird.io
 	foundDNS := false
@@ -197,11 +218,11 @@ func TestInjectIdempotent(t *testing.T) {
 	SetKernelMode(false)
 	defer SetKernelMode(false)
 
-	first, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", nil)
+	first, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := InjectNetbirdJSON(first, nil, "", "https://nb.example.wang", nil)
+	second, err := InjectNetbirdJSON(first, "", "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +272,7 @@ func TestInjectExistingManualRulesNotDuplicated(t *testing.T) {
 	  ]},
 	  "dns": {"rules": [{"domain_suffix": ["netbird.io", "nb.example.wang"], "server": "dns-direct"}]}
 	}`
-	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "https://nb.example.wang", nil)
+	out, err := InjectNetbirdJSON([]byte(cfg), "", "https://nb.example.wang", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +303,7 @@ func TestInjectStaleOverlayCleaned(t *testing.T) {
 	  {"ip_cidr": ["100.121.0.0/16"], "outbound": "nb-out"},
 	  {"rule_set": "geosite-!cn", "outbound": "proxy"}
 	]}, "dns": {}}`
-	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "", nil)
+	out, err := InjectNetbirdJSON([]byte(cfg), "", "", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +330,7 @@ func TestInjectControlPlaneIPs(t *testing.T) {
 	defer SetKernelMode(false)
 	ctlIPs := []string{"47.120.70.32/32", "1.2.3.4/32"}
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", ctlIPs)
+	out, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", ctlIPs, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +353,7 @@ func TestInjectControlPlaneIPs(t *testing.T) {
 	}
 
 	// Idempotent: same IPs must not duplicate the rule.
-	second, err := InjectNetbirdJSON(out, nil, "", "https://nb.example.wang", ctlIPs)
+	second, err := InjectNetbirdJSON(out, "", "https://nb.example.wang", ctlIPs, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +388,7 @@ func TestInjectDNSFallback(t *testing.T) {
 	  "outbounds": [{"type": "direct", "tag": "direct"}],
 	  "route": {"rule_set": [{"tag": "geosite-geolocation-!cn", "type": "remote"}], "rules": []}
 	}`
-	out, err := InjectNetbirdJSON([]byte(cfg), nil, "", "https://nb.example.wang", nil)
+	out, err := InjectNetbirdJSON([]byte(cfg), "", "https://nb.example.wang", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +412,7 @@ func TestInjectDNSFallbackMinimalProfile(t *testing.T) {
 
 	// Minimal profile without final: inject must not set final at all
 	// (previously it forced final=nb which broke non-CN resolution).
-	out, err := InjectNetbirdJSON([]byte(testConfig), nil, "", "https://nb.example.wang", nil)
+	out, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,5 +421,186 @@ func TestInjectDNSFallbackMinimalProfile(t *testing.T) {
 	dns := parsed["dns"].(map[string]any)
 	if _, hasFinal := dns["final"]; hasFinal {
 		t.Fatalf("final must not be injected, got %v", dns["final"])
+	}
+}
+
+func TestWriteDomainsRuleSet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nb-domains.json")
+
+	// non-empty domains → {"version":1,"rules":[{"domain_suffix":[...]}]}
+	if err := writeDomainsRuleSet(path, []string{"b.example.", "a.example"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, data)
+	}
+	if fmt.Sprint(m["version"]) != "1" {
+		t.Fatalf("version = %v, want 1 (PlainRuleSetCompat requires it)", m["version"])
+	}
+	rules := m["rules"].([]any)
+	if len(rules) != 1 {
+		t.Fatalf("rules len = %d, want 1", len(rules))
+	}
+	// domain rule present with trailing dots trimmed; NO ip_cidr rule
+	// (a DNS-referenced rule-set with IP fields is rejected by sing-box 1.14)
+	if _, hasCIDR := rules[0].(map[string]any)["ip_cidr"]; hasCIDR {
+		t.Fatal("rule-set must not contain ip_cidr (legacy DNS address-filter rejection)")
+	}
+	ds := rules[0].(map[string]any)["domain_suffix"].([]any)
+	if len(ds) != 2 || fmt.Sprint(ds[0]) != "b.example" || fmt.Sprint(ds[1]) != "a.example" {
+		t.Fatalf("domain_suffix wrong (trailing dots must be trimmed): %v", ds)
+	}
+
+	// empty domains → valid empty rule-set ({"version":1,"rules":[]})
+	if err := writeDomainsRuleSet(path, nil); err != nil {
+		t.Fatal(err)
+	}
+	data2, _ := os.ReadFile(path)
+	var m2 map[string]any
+	if err := json.Unmarshal(data2, &m2); err != nil {
+		t.Fatalf("empty rule-set bad JSON: %v\n%s", err, data2)
+	}
+	if len(m2["rules"].([]any)) != 0 {
+		t.Fatal("empty domains must produce an empty rules array")
+	}
+}
+
+func TestInjectCustomDomainRuleSet(t *testing.T) {
+	SetKernelMode(false)
+	defer SetKernelMode(false)
+
+	out, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	json.Unmarshal(out, &cfg)
+
+	// 1. route.rule_set declares BOTH local sets (domains + cidr) with paths
+	declFound := false
+	declCIDRFound := false
+	for _, rs := range cfg["route"].(map[string]any)["rule_set"].([]any) {
+		m := rs.(map[string]any)
+		switch fmt.Sprint(m["tag"]) {
+		case customRuleSetTag:
+			declFound = true
+			if fmt.Sprint(m["type"]) != "local" || fmt.Sprint(m["path"]) != testRuleSetPath {
+				t.Fatalf("rule-set decl wrong: %v", m)
+			}
+		case customCIDRRuleSetTag:
+			declCIDRFound = true
+			if fmt.Sprint(m["type"]) != "local" || fmt.Sprint(m["path"]) != testCIDRPath {
+				t.Fatalf("cidr rule-set decl wrong: %v", m)
+			}
+		}
+	}
+	if !declFound {
+		t.Fatal("route.rule_set: nb-domains declaration missing")
+	}
+	if !declCIDRFound {
+		t.Fatal("route.rule_set: nb-cidr declaration missing")
+	}
+
+	// 2. route rules reference both sets → nb-out (userspace)
+	route, _ := ruleList(t, out)
+	routeRef := false
+	routeCIDRRef := false
+	for _, r := range route {
+		m := r.(map[string]any)
+		if fmt.Sprint(m["rule_set"]) == customRuleSetTag && m["outbound"] == "nb-out" {
+			routeRef = true
+		}
+		if fmt.Sprint(m["rule_set"]) == customCIDRRuleSetTag && m["outbound"] == "nb-out" {
+			routeCIDRRef = true
+		}
+	}
+	if !routeRef {
+		t.Fatal("route rule nb-domains → nb-out missing")
+	}
+	if !routeCIDRRef {
+		t.Fatal("route rule nb-cidr → nb-out missing")
+	}
+
+	// 3. dns rule references ONLY the domain set → nb (the CIDR set must
+	// never be referenced by a DNS rule — 1.14 legacy-address-filter check)
+	_, dnsR := ruleList(t, out)
+	dnsRef := false
+	for _, r := range dnsR {
+		m := r.(map[string]any)
+		if fmt.Sprint(m["rule_set"]) == customRuleSetTag && m["server"] == "nb" {
+			dnsRef = true
+		}
+		if fmt.Sprint(m["rule_set"]) == customCIDRRuleSetTag {
+			t.Fatal("dns rule must not reference nb-cidr (legacy address-filter rejection)")
+		}
+	}
+	if !dnsRef {
+		t.Fatal("dns rule rule_set → nb missing")
+	}
+
+	// 4. idempotent: double inject keeps exactly one decl / one rule each
+	second, err := InjectNetbirdJSON(out, "", "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg2 map[string]any
+	json.Unmarshal(second, &cfg2)
+	declCount, declCIDRCount := 0, 0
+	for _, rs := range cfg2["route"].(map[string]any)["rule_set"].([]any) {
+		switch fmt.Sprint(rs.(map[string]any)["tag"]) {
+		case customRuleSetTag:
+			declCount++
+		case customCIDRRuleSetTag:
+			declCIDRCount++
+		}
+	}
+	if declCount != 1 || declCIDRCount != 1 {
+		t.Fatalf("rule-set decl counts after double inject = %d/%d, want 1/1", declCount, declCIDRCount)
+	}
+	route2, dns2 := ruleList(t, second)
+	routeRefCount, routeCIDRRefCount, dnsRefCount := 0, 0, 0
+	for _, r := range route2 {
+		switch fmt.Sprint(r.(map[string]any)["rule_set"]) {
+		case customRuleSetTag:
+			routeRefCount++
+		case customCIDRRuleSetTag:
+			routeCIDRRefCount++
+		}
+	}
+	for _, r := range dns2 {
+		if fmt.Sprint(r.(map[string]any)["rule_set"]) == customRuleSetTag {
+			dnsRefCount++
+		}
+	}
+	if routeRefCount != 1 || routeCIDRRefCount != 1 || dnsRefCount != 1 {
+		t.Fatalf("rule refs after double inject: route=%d routeCidr=%d dns=%d, want 1/1/1", routeRefCount, routeCIDRRefCount, dnsRefCount)
+	}
+
+	// 5. empty ruleSetPath → no rule-set machinery at all
+	noPath, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg3 map[string]any
+	json.Unmarshal(noPath, &cfg3)
+	if _, hasRuleSet := cfg3["route"].(map[string]any)["rule_set"]; hasRuleSet {
+		t.Fatal("rule_set must not be injected when ruleSetPath is empty")
+	}
+	route3, dns3 := ruleList(t, noPath)
+	for _, r := range route3 {
+		if fmt.Sprint(r.(map[string]any)["rule_set"]) == customRuleSetTag {
+			t.Fatal("route rule_set ref must not be injected when path empty")
+		}
+	}
+	for _, r := range dns3 {
+		if fmt.Sprint(r.(map[string]any)["rule_set"]) == customRuleSetTag {
+			t.Fatal("dns rule_set ref must not be injected when path empty")
+		}
 	}
 }
