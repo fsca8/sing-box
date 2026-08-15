@@ -63,7 +63,10 @@ func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified s
 
 	if result.Engine != nil {
 		netbirdEngine = result.Engine
-		writeMarker("NetbirdStartAll: engine started OK")
+		// 异步启动: 引擎实例已创建, 但连接/启动发生在后台 goroutine —
+		// 这里不代表启动成功(无网络时引擎会在后台重试/失败)。真实状态
+		// 看 nb-engine.log 的 "engine started"/"engine failed to start"。
+		writeMarker("NetbirdStartAll: engine instance created (async start, status in nb-engine.log)")
 	} else if result.EngineErr != "" {
 		writeMarker("NetbirdStartAll: engine failed to start: " + result.EngineErr)
 	} else {
