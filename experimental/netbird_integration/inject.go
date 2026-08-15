@@ -48,9 +48,6 @@ const customCIDRRuleSetTag = "nb-cidr"
 // empty/default, before returning). Empty ruleSetPath skips the rule-set
 // machinery entirely (no custom-domain rules injected).
 //
-// networkCIDR (from netbird SyncResponse, e.g. "100.121.0.0/16") is the
-// account's overlay subnet and is always routed through netbird; empty falls
-// back to the netbird default 100.121.0.0/16.
 // mgmtURL is the netbird management URL (netbird-config.json management_url);
 // its host — together with netbird.io — feeds the engine-traffic bypass rules.
 // ctlIPs are the engine's control-plane server IPs (management/STUN/TURN/
@@ -79,7 +76,7 @@ const customCIDRRuleSetTag = "nb-cidr"
 //          DNS must not go through dns-remote → proxy: 200-430ms → 58ms)
 // All injections are idempotent: matching rules already present in the config
 // (e.g. hand-edited) are kept and not duplicated.
-func InjectNetbirdJSON(rawData []byte, networkCIDR string, mgmtURL string, ctlIPs []string, ruleSetPath string, cidrRuleSetPath string) ([]byte, error) {
+func InjectNetbirdJSON(rawData []byte, mgmtURL string, ctlIPs []string, ruleSetPath string, cidrRuleSetPath string) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(rawData, &raw); err != nil {
 		return nil, err
@@ -173,16 +170,6 @@ func InjectNetbirdJSON(rawData []byte, networkCIDR string, mgmtURL string, ctlIP
 			raw["outbounds"] = outbounds
 		}
 
-		// Netbird internal IP range — always route through netbird outbound
-		// (dynamic from sync; falls back to the netbird default /16)
-		nbCIDR := networkCIDR
-		if nbCIDR == "" {
-			nbCIDR = "100.121.0.0/16"
-		}
-		prepended = append(prepended, map[string]any{
-			"ip_cidr":  []string{nbCIDR},
-			"outbound": "nb-out",
-		})
 		// Custom domains → nb-out via the local domain rule-set (domains live
 		// in the file, updated at runtime by the engine; see customRuleSetTag).
 		// Idempotent: skip when an existing rule (cleaned) or a just-prepended
@@ -194,7 +181,12 @@ func InjectNetbirdJSON(rawData []byte, networkCIDR string, mgmtURL string, ctlIP
 			})
 		}
 		// Overlay CIDR → nb-out via the local CIDR rule-set (real-time updates
-		// for accounts whose overlay differs from the default /16).
+		// for accounts whose overlay differs from the default /16). The overlay
+		// routing used to be a static ip_cidr rule baked into the config — it
+		// was removed: the CIDR now lives in nb-cidr.json (written at StartAll
+		// with the persisted/default value, refreshed by the engine after sync),
+		// so the route rule-set reference covers it with zero startup ordering
+		// dependency.
 		if cidrRuleSetPath != "" && !hasRuleSetRule(prepended, customCIDRRuleSetTag) && !hasRuleSetRule(cleaned, customCIDRRuleSetTag) {
 			prepended = append(prepended, map[string]any{
 				"rule_set":  customCIDRRuleSetTag,
