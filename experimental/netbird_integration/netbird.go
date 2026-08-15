@@ -194,7 +194,7 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 			}
 		}
 	}
-	modified, err := InjectNetbirdJSON(singBoxConfig, networkCIDR, cfg.ManagementURL, ctlIPs, ruleSetPath, cidrPath)
+	modified, err := InjectNetbirdJSON(singBoxConfig, cfg.ManagementURL, ctlIPs, ruleSetPath, cidrPath)
 	if err != nil {
 		// Non-fatal: sing-box still runs, just without netbird rules
 		log.Warn("inject netbird config: ", err)

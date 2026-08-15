@@ -59,7 +59,7 @@ func TestInjectBypassUserspace(t *testing.T) {
 	SetKernelMode(false)
 	defer SetKernelMode(false)
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, "", "")
+	out, err := InjectNetbirdJSON([]byte(testConfig), "https://nb.example.wang", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,8 @@ func TestInjectBypassUserspace(t *testing.T) {
 		t.Fatal("no dns-direct rule injected")
 	}
 
-	// userspace: nb-out outbound + overlay CIDR rule
+	// userspace: nb-out outbound + nb-cidr rule-set 规则(静态 ip_cidr 规则
+	// 已移除 — overlay 路由由 rule-set 引用承载, 见 InjectNetbirdJSON 注释)
 	var cfg map[string]any
 	json.Unmarshal(out, &cfg)
 	foundNB := false
@@ -124,18 +125,15 @@ func TestInjectBypassUserspace(t *testing.T) {
 	if !foundNB {
 		t.Fatal("nb-out not injected in userspace mode")
 	}
-	foundOverlay := false
+	// 不再注入静态 ip_cidr overlay 规则
 	for _, r := range route {
 		if cidrs, ok := r.(map[string]any)["ip_cidr"].([]any); ok {
 			for _, c := range cidrs {
 				if fmt.Sprint(c) == "100.121.0.0/16" {
-					foundOverlay = true
+					t.Fatal("static overlay CIDR rule must not be injected (nb-cidr rule-set replaces it)")
 				}
 			}
 		}
-	}
-	if !foundOverlay {
-		t.Fatal("overlay CIDR rule missing in userspace mode")
 	}
 }
 
@@ -143,7 +141,7 @@ func TestInjectKernelMode(t *testing.T) {
 	SetKernelMode(true)
 	defer SetKernelMode(false)
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), "100.121.0.0/16", "", nil, testRuleSetPath, testCIDRPath)
+	out, err := InjectNetbirdJSON([]byte(testConfig), "", nil, testRuleSetPath, testCIDRPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,11 +216,11 @@ func TestInjectIdempotent(t *testing.T) {
 	SetKernelMode(false)
 	defer SetKernelMode(false)
 
-	first, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	first, err := InjectNetbirdJSON([]byte(testConfig), "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := InjectNetbirdJSON(first, "", "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	second, err := InjectNetbirdJSON(first, "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +270,7 @@ func TestInjectExistingManualRulesNotDuplicated(t *testing.T) {
 	  ]},
 	  "dns": {"rules": [{"domain_suffix": ["netbird.io", "nb.example.wang"], "server": "dns-direct"}]}
 	}`
-	out, err := InjectNetbirdJSON([]byte(cfg), "", "https://nb.example.wang", nil, "", "")
+	out, err := InjectNetbirdJSON([]byte(cfg), "https://nb.example.wang", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +301,7 @@ func TestInjectStaleOverlayCleaned(t *testing.T) {
 	  {"ip_cidr": ["100.121.0.0/16"], "outbound": "nb-out"},
 	  {"rule_set": "geosite-!cn", "outbound": "proxy"}
 	]}, "dns": {}}`
-	out, err := InjectNetbirdJSON([]byte(cfg), "", "", nil, "", "")
+	out, err := InjectNetbirdJSON([]byte(cfg), "", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,8 +318,9 @@ func TestInjectStaleOverlayCleaned(t *testing.T) {
 			}
 		}
 	}
-	if count != 1 {
-		t.Fatalf("ip_cidr rules = %d, want 1 (stale cleaned, fresh injected)", count)
+	// 静态 overlay 规则已整体移除(rule-set 承载): 残留被清理且不再重新注入
+	if count != 0 {
+		t.Fatalf("ip_cidr rules = %d, want 0 (stale cleaned, no static re-injection)", count)
 	}
 }
 
@@ -330,7 +329,7 @@ func TestInjectControlPlaneIPs(t *testing.T) {
 	defer SetKernelMode(false)
 	ctlIPs := []string{"47.120.70.32/32", "1.2.3.4/32"}
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", ctlIPs, "", "")
+	out, err := InjectNetbirdJSON([]byte(testConfig), "https://nb.example.wang", ctlIPs, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +352,7 @@ func TestInjectControlPlaneIPs(t *testing.T) {
 	}
 
 	// Idempotent: same IPs must not duplicate the rule.
-	second, err := InjectNetbirdJSON(out, "", "https://nb.example.wang", ctlIPs, "", "")
+	second, err := InjectNetbirdJSON(out, "https://nb.example.wang", ctlIPs, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +387,7 @@ func TestInjectDNSFallback(t *testing.T) {
 	  "outbounds": [{"type": "direct", "tag": "direct"}],
 	  "route": {"rule_set": [{"tag": "geosite-geolocation-!cn", "type": "remote"}], "rules": []}
 	}`
-	out, err := InjectNetbirdJSON([]byte(cfg), "", "https://nb.example.wang", nil, "", "")
+	out, err := InjectNetbirdJSON([]byte(cfg), "https://nb.example.wang", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +411,7 @@ func TestInjectDNSFallbackMinimalProfile(t *testing.T) {
 
 	// Minimal profile without final: inject must not set final at all
 	// (previously it forced final=nb which broke non-CN resolution).
-	out, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, "", "")
+	out, err := InjectNetbirdJSON([]byte(testConfig), "https://nb.example.wang", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +474,7 @@ func TestInjectCustomDomainRuleSet(t *testing.T) {
 	SetKernelMode(false)
 	defer SetKernelMode(false)
 
-	out, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	out, err := InjectNetbirdJSON([]byte(testConfig), "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +551,7 @@ func TestInjectCustomDomainRuleSet(t *testing.T) {
 	}
 
 	// 4. idempotent: double inject keeps exactly one decl / one rule each
-	second, err := InjectNetbirdJSON(out, "", "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	second, err := InjectNetbirdJSON(out, "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +589,7 @@ func TestInjectCustomDomainRuleSet(t *testing.T) {
 	}
 
 	// 5. empty ruleSetPath → no rule-set machinery at all
-	noPath, err := InjectNetbirdJSON([]byte(testConfig), "", "https://nb.example.wang", nil, "", "")
+	noPath, err := InjectNetbirdJSON([]byte(testConfig), "https://nb.example.wang", nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
