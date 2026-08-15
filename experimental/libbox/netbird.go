@@ -23,6 +23,15 @@ func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified s
 	writeMarker("NetbirdStartAll ENTERED")
 	writeMarker("NetbirdStartAll: nbConfig length=" + strconv.Itoa(len(netbirdConfigJSON)))
 
+	// 同一进程内重复启动(Android stop→start、异常路径二次 start): 必须先
+	// 停掉旧引擎。否则旧引擎仍持有同一 WireGuard key / mgmt 连接 / 状态文件,
+	// 新引擎再拉一个同身份实例并存互踩 → netbird 隧道不可用(stop→start 必现)。
+	if netbirdEngine != nil {
+		writeMarker("NetbirdStartAll: stopping previous engine (stop→start)")
+		netbirdEngine.Shutdown()
+		netbirdEngine = nil
+	}
+
 	cfg, err := netbird_integration.ParseConfig(netbirdConfigJSON)
 	if err != nil {
 		writeMarker("NetbirdStartAll: ParseConfig FAILED: " + err.Error())
@@ -62,6 +71,25 @@ func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified s
 	}
 
 	return string(result.ModifiedConfig), nil
+}
+
+// NetbirdStop stops the netbird engine and clears the integration state
+// (global nb-out/DNS client, tunnel DNS address, network watcher).
+//
+// Must be called when the host service (Android VpnService) is torn down:
+// BoxService.stop() only closes the sing-box service — without this the
+// embed client keeps its WireGuard key / management connection / state
+// files alive, and the next start pulls up a second engine with the same
+// identity, which fights the first one (stop→start leaves netbird dead).
+func NetbirdStop() {
+	writeMarker("NetbirdStop ENTERED")
+	if netbirdEngine != nil {
+		netbirdEngine.Shutdown()
+		netbirdEngine = nil
+		writeMarker("NetbirdStop: engine stopped")
+	} else {
+		writeMarker("NetbirdStop: no engine running")
+	}
 }
 
 // NetbirdBridgeTCP starts an overlay→local TCP bridge on the given port.
