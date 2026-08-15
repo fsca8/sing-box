@@ -493,10 +493,17 @@ func TestInjectCustomDomainRuleSet(t *testing.T) {
 			if fmt.Sprint(m["type"]) != "local" || fmt.Sprint(m["path"]) != testRuleSetPath {
 				t.Fatalf("rule-set decl wrong: %v", m)
 			}
+			// format 必须显式(Windows 盘符路径会破坏 1.14 的扩展名推断)
+			if fmt.Sprint(m["format"]) != "source" {
+				t.Fatalf("rule-set decl must carry explicit format=source: %v", m)
+			}
 		case customCIDRRuleSetTag:
 			declCIDRFound = true
 			if fmt.Sprint(m["type"]) != "local" || fmt.Sprint(m["path"]) != testCIDRPath {
 				t.Fatalf("cidr rule-set decl wrong: %v", m)
+			}
+			if fmt.Sprint(m["format"]) != "source" {
+				t.Fatalf("cidr rule-set decl must carry explicit format=source: %v", m)
 			}
 		}
 	}

@@ -203,12 +203,16 @@ func InjectNetbirdJSON(rawData []byte, networkCIDR string, mgmtURL string, ctlIP
 		}
 		// nb-cidr rule-set declaration — userspace only (kernel mode routes
 		// the overlay via the kernel route, no route rules at all).
+		// format 必须显式: 1.14 的 ruleSetDefaultFormat 用 url.Parse 推断
+		// 扩展名, Windows 盘符路径(C:\...)被当成 URL scheme → 推断失败 →
+		// "missing format"(Android /data/... 路径正常)。显式 source 全平台稳。
 		if cidrRuleSetPath != "" && !hasRuleSetDecl(routeSection, customCIDRRuleSetTag) {
 			ruleSets, _ := routeSection["rule_set"].([]any)
 			routeSection["rule_set"] = append(ruleSets, map[string]any{
-				"type": "local",
-				"tag":  customCIDRRuleSetTag,
-				"path": cidrRuleSetPath,
+				"type":   "local",
+				"tag":    customCIDRRuleSetTag,
+				"path":   cidrRuleSetPath,
+				"format": "source",
 			})
 		}
 	}
@@ -217,13 +221,15 @@ func InjectNetbirdJSON(rawData []byte, networkCIDR string, mgmtURL string, ctlIP
 	// Local rule-set declaration (nb-domains): route AND DNS rules resolve
 	// rule-set tags through the route.rule_set registry (box.go:
 	// router.Initialize(routeOptions.RuleSet)). Declared in both modes — the
-	// DNS custom-domain rule needs it in kernel mode too.
+	// DNS custom-domain rule needs it in kernel mode too. format 显式, 理由
+	// 同上(Windows 路径推断失败)。
 	if ruleSetPath != "" && !hasRuleSetDecl(routeSection, customRuleSetTag) {
 		ruleSets, _ := routeSection["rule_set"].([]any)
 		routeSection["rule_set"] = append(ruleSets, map[string]any{
-			"type": "local",
-			"tag":  customRuleSetTag,
-			"path": ruleSetPath,
+			"type":   "local",
+			"tag":    customRuleSetTag,
+			"path":   ruleSetPath,
+			"format": "source",
 		})
 	}
 
