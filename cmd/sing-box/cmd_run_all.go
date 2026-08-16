@@ -225,6 +225,9 @@ func buildNetbirdConfig(cfgPath string) *netbird_integration.Config {
 		if fileCfg.PrivateKey != "" {
 			cfg.PrivateKey = fileCfg.PrivateKey
 		}
+		if len(fileCfg.ExposePorts) > 0 {
+			cfg.ExposePorts = fileCfg.ExposePorts
+		}
 	}
 	return cfg
 }
