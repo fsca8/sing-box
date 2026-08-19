@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sagernet/sing-box/experimental/logkit"
 	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/experimental/netbird_integration"
 	"github.com/sagernet/sing-box/log"
@@ -141,6 +142,22 @@ func runAllEngines(cfgPath string) (func(), error) {
 	var options option.Options
 	if len(optionsList) > 0 {
 		options = optionsList[0].options
+	}
+
+	// 统一引擎日志路径: 无论 netbird 开关与否, 非 console 输出一律落到
+	// <配置目录>/logs/engine.log。netbird 开启时 .nb-tmp.json 已由
+	// InjectLogOutput 规范化(绝对路径), 此处幂等; netbird 关闭时兜底。
+	configDir := filepath.Dir(cfgPath)
+	if options.Log != nil && !options.Log.Disabled {
+		switch options.Log.Output {
+		case "stderr", "stdout":
+			// console 输出保留 (Flutter 捕获 stderr → app.log)
+		default:
+			options.Log.Output = filepath.Join(logkit.LogsDir(configDir), logkit.EngineLogName)
+		}
+	}
+	if err := os.MkdirAll(logkit.LogsDir(configDir), 0700); err != nil {
+		log.Warn("run-all: mkdir logs dir: ", err)
 	}
 
 	t1 := time.Now()

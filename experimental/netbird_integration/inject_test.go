@@ -610,3 +610,57 @@ func TestInjectCustomDomainRuleSet(t *testing.T) {
 		}
 	}
 }
+func TestInjectLogOutput(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	cases := []struct {
+		name   string
+		config string
+		want   string // 期望 output；"stderr"/"stdout" 表示保持原样
+	}{
+		{"empty output -> engine.log", `{"log":{"level":"info"}}`, "engine.log"},
+		{"relative output -> engine.log", `{"log":{"output":"singbox.log"}}`, "engine.log"},
+		{"absolute output -> engine.log", `{"log":{"output":"D:/x/y.log"}}`, "engine.log"},
+		{"stderr preserved", `{"log":{"output":"stderr"}}`, "stderr"},
+		{"stdout preserved", `{"log":{"output":"stdout"}}`, "stdout"},
+		{"disabled untouched", `{"log":{"disabled":true,"output":"stderr"}}`, "stderr"},
+		{"no log section -> engine.log", `{}`, "engine.log"},
+	}
+	wantPath := filepath.Join(dataDir, "logs", "engine.log")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := InjectLogOutput([]byte(c.config), dataDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cfg map[string]any
+			if err := json.Unmarshal(got, &cfg); err != nil {
+				t.Fatal(err)
+			}
+			logSection, _ := cfg["log"].(map[string]any)
+			var out string
+			if logSection != nil {
+				out, _ = logSection["output"].(string)
+			}
+			want := c.want
+			if want != "stderr" && want != "stdout" {
+				want = wantPath
+			}
+			if out != want {
+				t.Fatalf("output = %q, want %q", out, want)
+			}
+		})
+	}
+	// 幂等: 二次注入结果不变
+	twice, err := InjectLogOutput([]byte(`{"log":{"output":"singbox.log"}}`), dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	once, err := InjectLogOutput(twice, dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(twice) != string(once) {
+		t.Fatal("InjectLogOutput not idempotent")
+	}
+}

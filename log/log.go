@@ -4,11 +4,15 @@ import (
 	"context"
 	"io"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
 )
+
+// 引擎文件日志轮转上限由 log.max_file_size_mb 配置控制（见 log.New），
+// 不再使用默认常量。
 
 type Options struct {
 	Context        context.Context
@@ -50,13 +54,22 @@ func New(options Options) (Factory, error) {
 		FullTimestamp:    logOptions.Timestamp,
 		TimestampFormat:  "-0700 2006-01-02 15:04:05",
 	}
-	factory := NewDefaultFactory(
+	// 轮转上限（fork）：log.max_file_size_mb > 0 时启用轮转 + 统一格式。
+	// 环境变量 SINGBOX_LOG_MAX_MB 可覆盖（MB）。
+	maxFileSize := logOptions.MaxFileSizeMB << 20
+	if envStr := os.Getenv("SINGBOX_LOG_MAX_MB"); envStr != "" {
+		if mb, err := strconv.ParseInt(envStr, 10, 64); err == nil && mb > 0 {
+			maxFileSize = mb << 20
+		}
+	}
+	factory := NewDefaultFactoryWithRotation(
 		options.Context,
 		logFormatter,
 		logWriter,
 		logFilePath,
 		options.PlatformWriter,
 		options.Observable,
+		maxFileSize,
 	)
 	if logOptions.Level != "" {
 		logLevel, err := ParseLevel(logOptions.Level)

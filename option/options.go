@@ -72,6 +72,10 @@ type LogOptions struct {
 	Output       string `json:"output,omitempty"`
 	Timestamp    bool   `json:"timestamp,omitempty"`
 	DisableColor bool   `json:"-"`
+	// MaxFileSizeMB 文件日志轮转上限（fork 新增，不入上游）。>0 时启用
+	// 大小轮转（保留 3 份备份）+ 统一线格式转换（singbird 日志约定）。
+	// 未设置/0 = 不轮转、保持原生日志格式（上游行为）。
+	MaxFileSizeMB int64 `json:"max_file_size_mb,omitempty"`
 }
 
 type StubOptions struct{}

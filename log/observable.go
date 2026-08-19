@@ -21,7 +21,9 @@ type defaultFactory struct {
 	platformFormatter Formatter
 	writer            io.Writer
 	file              *os.File
+	rotating          io.WriteCloser
 	filePath          string
+	rotateSize        int64
 	platformWriters   atomic.Pointer[[]PlatformWriter]
 	needObservable    bool
 	level             Level
@@ -37,6 +39,22 @@ func NewDefaultFactory(
 	platformWriter PlatformWriter,
 	needObservable bool,
 ) ObservableFactory {
+	return NewDefaultFactoryWithRotation(
+		ctx, formatter, writer, filePath, platformWriter, needObservable, 0,
+	)
+}
+
+// NewDefaultFactoryWithRotation 是带文件轮转上限的版本（fork 新增）。
+// maxFileSize <= 0 表示不轮转（等价于 NewDefaultFactory）。
+func NewDefaultFactoryWithRotation(
+	ctx context.Context,
+	formatter Formatter,
+	writer io.Writer,
+	filePath string,
+	platformWriter PlatformWriter,
+	needObservable bool,
+	maxFileSize int64,
+) ObservableFactory {
 	factory := &defaultFactory{
 		ctx:       ctx,
 		formatter: formatter,
@@ -48,6 +66,7 @@ func NewDefaultFactory(
 		filePath:       filePath,
 		needObservable: needObservable,
 		level:          LevelTrace,
+		rotateSize:     maxFileSize,
 		subscriber:     observable.NewSubscriber[Entry](128),
 	}
 	if platformWriter != nil {
@@ -65,8 +84,27 @@ func (f *defaultFactory) Start() error {
 		if err != nil {
 			return err
 		}
-		f.writer = logFile
-		f.file = logFile
+		if f.rotateSize > 0 {
+			rotating, rerr := NewRotatingWriter(
+				f.filePath,
+				f.rotateSize,
+				3,
+				func(path string, flag int, perm os.FileMode) (*os.File, error) {
+					return filemanager.OpenFile(f.ctx, path, flag, perm)
+				},
+			)
+			if rerr != nil {
+				return rerr
+			}
+			// NewRotatingWriter 已自行打开文件，Start 打开的句柄直接丢弃
+			_ = logFile.Close()
+			// 统一线格式转换（fork）：sing-box 原生行 → `ts |L| engine|tag|msg`
+			f.writer = &unifiedWriter{w: rotating}
+			f.rotating = rotating
+		} else {
+			f.writer = logFile
+			f.file = logFile
+		}
 	}
 	if f.needObservable {
 		f.observer = observable.NewObserver[Entry](f.subscriber, 64)
@@ -75,10 +113,18 @@ func (f *defaultFactory) Start() error {
 }
 
 func (f *defaultFactory) Close() error {
-	return common.Close(
-		common.PtrOrNil(f.file),
-		f.subscriber,
-	)
+	var closers []io.Closer
+	if f.rotating != nil {
+		closers = append(closers, f.rotating)
+	} else if f.file != nil {
+		closers = append(closers, f.file)
+	}
+	closers = append(closers, f.subscriber)
+	args := make([]any, 0, len(closers))
+	for _, c := range closers {
+		args = append(args, c)
+	}
+	return common.Close(args...)
 }
 
 func (f *defaultFactory) AttachPlatformWriter(writer PlatformWriter) {

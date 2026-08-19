@@ -16,8 +16,11 @@ import (
 	"sync"
 	"time"
 
+	sblog "github.com/sagernet/sing-box/log"
+
 	log "github.com/sirupsen/logrus"
 
+	"github.com/sagernet/sing-box/experimental/logkit"
 	nbembed "github.com/netbirdio/netbird/client/embed"
 	nbnet "github.com/netbirdio/netbird/client/net"
 )
@@ -200,6 +203,12 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 		log.Warn("inject netbird config: ", err)
 		result.ModifiedConfig = singBoxConfig
 	} else {
+		// 统一引擎日志: log.output → <DataDir>/logs/engine.log (Android/Windows
+		// 共用此路径; 幂等)。失败不阻断, 引擎仍按原输出运行。
+		modified, err = InjectLogOutput(modified, cfg.DataDir)
+		if err != nil {
+			log.Warn("inject log output: ", err)
+		}
 		result.ModifiedConfig = modified
 	}
 	result.Engine = engine
@@ -427,17 +436,22 @@ func (e *Engine) Start() error {
 	os.MkdirAll(stateDir, 0700)
 	opts.ConfigPath = filepath.Join(stateDir, "config.json")
 	opts.StatePath = filepath.Join(stateDir, "state.json")
-	// Send netbird engine logs to DataDir/nb-engine.log so relay/P2P
+	// Send netbird engine logs to DataDir/logs/netbird.log so relay/P2P
 	// paths, peer states and bridge failures are diagnosable. The default
-	// os.Stderr sink is swallowed by gomobile/libbox on Android.
-	if logFile, err := os.OpenFile(
-		filepath.Join(e.cfg.DataDir, "nb-engine.log"),
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600,
+	// os.Stderr sink is swallowed by gomobile/libbox on Android. Rotating
+	// writer caps the file at 5MB (keep 2 backups) — unbounded growth was
+	// the pre-refactor behavior.
+	logPath := filepath.Join(logkit.LogsDir(e.cfg.DataDir), logkit.NetbirdLogName)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
+		log.Warn("netbird: mkdir logs dir: ", err)
+	}
+	if logWriter, err := sblog.NewRotatingWriter(
+		logPath, logkit.MaxLogBytes, logkit.NetbirdKeepFiles, nil,
 	); err == nil {
-		opts.LogOutput = logFile
-		log.Info("netbird: engine logs → " + filepath.Join(e.cfg.DataDir, "nb-engine.log"))
+		opts.LogOutput = logWriter
+		log.Info("netbird: engine logs → " + logPath)
 	} else {
-		log.Warn("netbird: open nb-engine.log: ", err)
+		log.Warn("netbird: open netbird log: ", err)
 	}
 
 	// Kernel-TUN mode (Linux only): real kernel TUN + no netbird-managed

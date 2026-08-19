@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path/filepath"
+
+	"github.com/sagernet/sing-box/experimental/logkit"
 )
 
 // kernelMode selects the Linux kernel-TUN data path (Route A):
@@ -387,4 +390,41 @@ func containsAll(haystack []any, needles []string) bool {
 		}
 	}
 	return true
+}
+
+// InjectLogOutput 把 sing-box 配置的 log.output 规范化为
+// <dataDir>/logs/engine.log（统一日志目录约定，见 experimental/logkit）。
+//
+// 触发条件/规则：
+// - log.disabled=true 或 output 为 stderr/stdout 时保持不动（console 输出
+//   由 Flutter 捕获进 app.log / libbox 平台 writer，仍然可见）
+// - 其余一切（空、相对路径、任意绝对路径）一律指向 logs/engine.log，
+//   保证 Windows（相对路径会落 exe 目录）与 Android（落 filesDir 根）一致。
+//   幂等：已是目标路径时结果不变。
+func InjectLogOutput(rawData []byte, dataDir string) ([]byte, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(rawData, &raw); err != nil {
+		return nil, err
+	}
+	logSection, _ := raw["log"].(map[string]any)
+	if logSection == nil {
+		logSection = make(map[string]any)
+		raw["log"] = logSection
+	}
+	if disabled, _ := logSection["disabled"].(bool); disabled {
+		return rawData, nil
+	}
+	output, _ := logSection["output"].(string)
+	switch output {
+	case "stderr", "stdout":
+		return rawData, nil
+	}
+	target := filepath.Join(logkit.LogsDir(dataDir), logkit.EngineLogName)
+	if output == target && logSection["max_file_size_mb"] != nil {
+		return rawData, nil
+	}
+	logSection["output"] = target
+	// 轮转上限（MB）：>0 启用大小轮转 + 统一线格式转换
+	logSection["max_file_size_mb"] = logkit.MaxLogBytes >> 20
+	return json.Marshal(raw)
 }
