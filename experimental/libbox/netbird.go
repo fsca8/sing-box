@@ -55,6 +55,11 @@ func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified s
 		writeMarker("NetbirdStartAll: no android protector (netbird control-plane will use VpnService TUN)")
 	}
 
+	// Android 上标准库 netlink 接口枚举被 SELinux 禁止 → ICE 无 host 候选
+	// → 全走 relay。把 Kotlin 注入的 IFaceDiscover(java NetworkInterface)
+	// 桥接给 netbird 引擎, 必须在 engine.Start() 之前。
+	registerIFaceDiscover()
+
 	result, err := netbird_integration.StartAll(cfg, []byte(singBoxConfig))
 	if err != nil {
 		writeMarker("NetbirdStartAll: StartAll FAILED: " + err.Error())
