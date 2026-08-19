@@ -1,0 +1,183 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true,
+    "output": "singbox.log",
+    "max_file_size_mb": 5
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "access_control_allow_origin": [
+          "*"
+        ],
+      "access_control_allow_private_network": true
+    }
+  },
+  "dns": {
+    "strategy": "ipv4_only",
+    "servers": [
+        {
+          "type": "https",
+          "tag": "dns-direct",
+          "server": "223.5.5.5",
+          "path": "/dns-query"
+        },
+        {
+          "type": "https",
+          "tag": "dns-remote",
+          "server": "1.1.1.1",
+          "path": "/dns-query",
+          "detour": "proxy"
+        }
+      ],
+    "rules": [
+        {
+          "rule_set": "geosite-category-ads",
+          "action": "reject"
+        },
+        {
+          "domain_suffix": [
+              "example.com"
+            ],
+          "server": "dns-direct"
+        },
+        {
+          "rule_set": "geosite-cn",
+          "server": "dns-direct"
+        }
+      ],
+    "final": "dns-remote"
+  },
+  "inbounds": [
+      {
+        "type": "tun",
+        "tag": "tun-in",
+        "interface_name": "singtun",
+        "address": [
+            "172.19.0.1/30"
+          ],
+        "mtu": 1500,
+        "auto_route": true,
+        "strict_route": false,
+        "stack": "mixed"
+      }
+    ],
+  "outbounds": [
+      {
+        "type": "vless",
+        "tag": "proxy",
+        "server": "YOUR_SERVER_IP",
+        "server_port": 443,
+        "uuid": "11111111-1111-1111-1111-111111111111",
+        "flow": "xtls-rprx-vision",
+        "packet_encoding": "xudp",
+        "tls": {
+          "enabled": true,
+          "server_name": "YOUR_SNI_DOMAIN",
+          "utls": {
+            "enabled": true,
+            "fingerprint": "chrome"
+          },
+          "reality": {
+            "enabled": true,
+            "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "short_id": "0000000000000000"
+          }
+        },
+        "tcp_fast_open": true
+
+      },
+      {
+        "type": "direct",
+        "tag": "direct"
+      },
+      {
+        "type": "block",
+        "tag": "block"
+      }
+    ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "dns-direct",
+    "find_process": true,
+    "rule_set": [
+        {
+          "type": "remote",
+          "tag": "geoip-cn",
+          "format": "binary",
+          "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs"
+        },
+        {
+          "type": "remote",
+          "tag": "geosite-cn",
+          "format": "binary",
+          "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs"
+        },
+        {
+          "type": "remote",
+          "tag": "geosite-category-ads",
+          "format": "binary",
+          "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads.srs"
+        },
+        {
+          "type": "remote",
+          "tag": "geosite-geolocation-!cn",
+          "format": "binary",
+          "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-geolocation-!cn.srs"
+        }
+      ],
+    "rules": [
+        {
+          "action": "sniff"
+        },
+        {
+          "protocol": "dns",
+          "action": "hijack-dns"
+        },
+        {
+          "ip_cidr": [
+              "224.0.0.0/4",
+              "255.255.255.255/32"
+            ],
+          "port": [
+              5353
+            ],
+          "outbound": "direct"
+        },
+        {
+          "rule_set": "geosite-category-ads",
+          "outbound": "block"
+        },
+        {
+          "domain_suffix": [
+              "example.com"
+            ],
+          "outbound": "direct"
+        },
+        {
+          "ip_cidr": [
+              "198.51.100.0/24"
+            ],
+          "outbound": "proxy"
+        },
+        {
+          "rule_set": "geosite-geolocation-!cn",
+          "outbound": "proxy"
+        },
+        {
+          "rule_set": "geosite-cn",
+          "outbound": "direct"
+        },
+        {
+          "rule_set": "geoip-cn",
+          "outbound": "direct"
+        },
+        {
+          "protocol": "dns",
+          "outbound": "direct"
+        }
+      ],
+    "final": "proxy"
+  }
+}
