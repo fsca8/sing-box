@@ -19,11 +19,19 @@ type Collector struct {
 
 var globalCollector *Collector
 
+// NewCollector creates the collector with the default growth caps
+// (100 MB / 200k DNS rows / 100k connection rows / 7 days).
 func NewCollector(dbPath string) (*Collector, error) {
+	return NewCollectorWithLimits(dbPath, DefaultLimits())
+}
+
+// NewCollectorWithLimits creates the collector with explicit growth caps
+// (see LimitsFrom for the config file mapping).
+func NewCollectorWithLimits(dbPath string, limits Limits) (*Collector, error) {
 	dir := filepath.Dir(dbPath)
 	os.MkdirAll(dir, 0755)
 
-	db, err := NewDatabase(dbPath)
+	db, err := NewDatabaseWithLimits(dbPath, limits)
 	if err != nil {
 		return nil, err
 	}

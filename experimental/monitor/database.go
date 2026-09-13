@@ -23,15 +23,28 @@ type Database struct {
 	db            *sql.DB
 	writeCh       chan dbEvent
 	done          chan struct{}
+	stopCh        chan struct{}
+	pruneSignal   chan struct{}
 	closed        atomic.Bool
 	dropped       atomic.Int64
 	batchSize     int
 	flushInterval time.Duration
+	limits        Limits
+	dbPath        string
 	wg            sync.WaitGroup
 }
 
-// NewDatabase opens (or creates) the SQLite database and starts the async writer.
+// NewDatabase opens (or creates) the SQLite database and starts the async
+// writer, applying the default growth caps (see limits.go).
 func NewDatabase(path string) (*Database, error) {
+	return NewDatabaseWithLimits(path, DefaultLimits())
+}
+
+// NewDatabaseWithLimits opens (or creates) the SQLite database, applies the
+// configured growth caps (size / row / retention), and starts the async writer
+// plus the periodic maintenance goroutine.
+func NewDatabaseWithLimits(path string, limits Limits) (*Database, error) {
+	limits = limits.withDefaults()
 	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, err
@@ -42,8 +55,12 @@ func NewDatabase(path string) (*Database, error) {
 		db:            db,
 		writeCh:       make(chan dbEvent, 4096),
 		done:          make(chan struct{}),
+		stopCh:        make(chan struct{}),
+		pruneSignal:   make(chan struct{}, 1),
 		batchSize:     100,
 		flushInterval: 200 * time.Millisecond,
+		limits:        limits,
+		dbPath:        path,
 	}
 
 	if err := d.migrate(); err != nil {
@@ -51,16 +68,34 @@ func NewDatabase(path string) (*Database, error) {
 		return nil, err
 	}
 
-	// Clean up data older than 7 days on startup
-	if err := d.Cleanup(7, 7); err != nil {
+	// Growth caps: auto_vacuum=FULL so pruning actually frees disk space.
+	if err := d.enableAutoVacuum(); err != nil {
+		fmt.Printf("[monitor] enable auto-vacuum failed: %v\n", err)
+	}
+
+	// Time-based retention, then bring an oversized database (from a previous
+	// unbounded run) back under the caps before serving.
+	if err := d.Cleanup(limits.RetentionDays); err != nil {
 		fmt.Printf("[monitor] cleanup failed: %v\n", err)
 	}
+	if err := d.enforceLimitsAtStartup(); err != nil {
+		fmt.Printf("[monitor] initial trim failed: %v\n", err)
+	}
+	// The hard page limit is applied last: on an oversized legacy database a
+	// delete could otherwise fail because the freelist needs a new page.
+	if err := d.applyHardSizeLimit(); err != nil {
+		fmt.Printf("[monitor] apply size limit failed: %v\n", err)
+	}
+	fmt.Printf("[monitor] db limits: size cap %s, dns rows %d, conn rows %d, retention %d day(s)\n",
+		formatBytes(limits.MaxSizeBytes), limits.MaxDNSRows, limits.MaxConnRows, limits.RetentionDays)
 
 	// Ensure UNIQUE index for per-connection upsert — key is conn_id
 	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_conn_id ON connection_records(conn_id)")
 
 	d.wg.Add(1)
 	go d.writer()
+	d.wg.Add(1)
+	go d.maintenance()
 
 	return d, nil
 }
@@ -249,6 +284,10 @@ func (d *Database) flushBatch(batch []dbEvent) {
 
 	if err := tx.Commit(); err != nil {
 		d.dropped.Add(int64(len(batch)))
+		// A commit can fail because the hard size cap (PRAGMA max_page_count)
+		// was reached: ask maintenance for an immediate prune instead of
+		// dropping records until the next tick.
+		d.signalPrune()
 	}
 }
 
@@ -418,18 +457,43 @@ func (d *Database) QueryStats() (uploadTotal, downloadTotal int64, err error) {
 	return
 }
 
-// Cleanup deletes records older than the given number of days.
-func (d *Database) Cleanup(dnsDays, connDays int) error {
+// Cleanup deletes records older than the given number of days (<= 0 disables
+// time-based retention).
+func (d *Database) Cleanup(days int) error {
+	if days <= 0 {
+		return nil
+	}
 	now := time.Now().UnixMilli()
-	dnsCutoff := now - int64(dnsDays)*86400000
-	connCutoff := now - int64(connDays)*86400000
+	cutoff := now - int64(days)*86400000
 
-	_, err := d.db.Exec("DELETE FROM dns_records WHERE timestamp_ms < ?", dnsCutoff)
+	_, err := d.db.Exec("DELETE FROM dns_records WHERE timestamp_ms < ?", cutoff)
 	if err != nil {
 		return err
 	}
-	_, err = d.db.Exec("DELETE FROM connection_records WHERE start_time_ms < ?", connCutoff)
-	return err
+	deleted, err := d.db.Exec("DELETE FROM connection_records WHERE start_time_ms < ?", cutoff)
+	if err != nil {
+		return err
+	}
+	if deleted != nil {
+		if affected, affectedErr := deleted.RowsAffected(); affectedErr == nil && affected > 0 {
+			if err = d.checkpoint(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// enforceLimitsAtStartup applies the row/size caps once before the writer
+// starts, so a database left oversized by an earlier run is trimmed up front.
+func (d *Database) enforceLimitsAtStartup() error {
+	before := d.fileSize()
+	d.enforceLimits()
+	after := d.fileSize()
+	if after < before {
+		fmt.Printf("[monitor] db shrunk %s → %s\n", formatBytes(before), formatBytes(after))
+	}
+	return nil
 }
 
 // Close gracefully shuts down the writer and closes the database.
@@ -437,6 +501,7 @@ func (d *Database) Close() error {
 	if d.closed.Swap(true) {
 		return nil // already closed
 	}
+	close(d.stopCh)
 	close(d.writeCh)
 	d.wg.Wait()
 	close(d.done)

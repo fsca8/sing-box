@@ -168,7 +168,17 @@ func create(options option.Options) (*box.Box, context.CancelFunc, error) {
 		monitorDir = "."
 	}
 	monitorDB := filepath.Join(monitorDir, "monitor.db")
-	if _, err := monitor.NewCollector(monitorDB); err != nil {
+	monitorLimits := monitor.DefaultLimits()
+	if options.Experimental != nil && options.Experimental.Monitor != nil {
+		monitorOptions := options.Experimental.Monitor
+		monitorLimits = monitor.LimitsFrom(
+			monitorOptions.MaxSizeMB,
+			monitorOptions.MaxDNSRows,
+			monitorOptions.MaxConnRows,
+			monitorOptions.RetentionDays,
+		)
+	}
+	if _, err := monitor.NewCollectorWithLimits(monitorDB, monitorLimits); err != nil {
 		log.Warn("monitor: ", err)
 	} else {
 		log.Info("monitor collector started, db: ", monitorDB)

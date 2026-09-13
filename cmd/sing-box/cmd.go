@@ -59,7 +59,7 @@ func preRun(cmd *cobra.Command, args []string) {
 		globalCtx = filemanager.WithDefault(globalCtx, "", "", sudoUID, sudoGID)
 	}
 	if disableColor {
-		log.SetStdLogger(log.NewDefaultFactory(context.Background(), log.Formatter{BaseTime: time.Now(), DisableColors: true}, os.Stderr, "", nil, false).Logger())
+		log.SetStdLogger(log.NewDefaultFactory(context.Background(), log.Formatter{BaseTime: time.Now(), DisableColors: true}, os.Stderr, "", 0, nil, false).Logger())
 	}
 	if workingDir != "" {
 		_, err := os.Stat(workingDir)

@@ -7,6 +7,22 @@ type ExperimentalOptions struct {
 	ClashAPI  *ClashAPIOptions  `json:"clash_api,omitempty"`
 	V2RayAPI  *V2RayAPIOptions  `json:"v2ray_api,omitempty"`
 	Debug     *DebugOptions     `json:"debug,omitempty"`
+	Monitor   *MonitorOptions   `json:"monitor,omitempty"`
+}
+
+// MonitorOptions configures the built-in monitoring collector (monitor.db).
+// Every field is optional: 0 keeps the default, a negative value disables the
+// corresponding cap, a positive value overrides it.
+type MonitorOptions struct {
+	// MaxSizeMB caps the on-disk size of monitor.db. Defaults to 100 MB.
+	// Oldest records are removed first when the cap is reached.
+	MaxSizeMB int `json:"max_size_mb,omitempty"`
+	// MaxDNSRows caps how many DNS records are kept (default 200000).
+	MaxDNSRows int `json:"max_dns_rows,omitempty"`
+	// MaxConnRows caps how many connection records are kept (default 100000).
+	MaxConnRows int `json:"max_conn_rows,omitempty"`
+	// RetentionDays deletes records older than N days on startup (default 7).
+	RetentionDays int `json:"retention_days,omitempty"`
 }
 
 type CacheFileOptions struct {

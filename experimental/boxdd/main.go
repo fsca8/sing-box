@@ -38,7 +38,7 @@ func main() {
 	log.SetStdLogger(log.NewDefaultFactory(context.Background(), log.Formatter{
 		BaseTime:      time.Now(),
 		DisableColors: true,
-	}, os.Stderr, "", nil, false).Logger())
+	}, os.Stderr, "", 0, nil, false).Logger())
 	err := mainCommand.Execute()
 	if err != nil {
 		log.Fatal(err)
