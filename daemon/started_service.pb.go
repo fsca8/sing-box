@@ -1,13 +1,12 @@
 package daemon
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -340,7 +339,7 @@ func (x *Version) GetApiVersion() int32 {
 
 type ServiceStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        ServiceStatus_Type     `protobuf:"varint,1,opt,name=status,proto3,enum=daemon.ServiceStatus_Type" json:"status,omitempty"`
+	Status        ServiceStatus_Type     `protobuf:"varint,1,opt,name=status,proto3,enum=sbox.daemon.ServiceStatus_Type" json:"status,omitempty"`
 	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=errorMessage,proto3" json:"errorMessage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -488,7 +487,7 @@ func (x *Log) GetReset_() bool {
 
 type DefaultLogLevel struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Level         LogLevel               `protobuf:"varint,1,opt,name=level,proto3,enum=daemon.LogLevel" json:"level,omitempty"`
+	Level         LogLevel               `protobuf:"varint,1,opt,name=level,proto3,enum=sbox.daemon.LogLevel" json:"level,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1124,7 +1123,7 @@ func (x *SubscribeConnectionsRequest) GetInterval() int64 {
 
 type ConnectionEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          ConnectionEventType    `protobuf:"varint,1,opt,name=type,proto3,enum=daemon.ConnectionEventType" json:"type,omitempty"`
+	Type          ConnectionEventType    `protobuf:"varint,1,opt,name=type,proto3,enum=sbox.daemon.ConnectionEventType" json:"type,omitempty"`
 	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
 	Connection    *Connection            `protobuf:"bytes,3,opt,name=connection,proto3" json:"connection,omitempty"`
 	UplinkDelta   int64                  `protobuf:"varint,4,opt,name=uplinkDelta,proto3" json:"uplinkDelta,omitempty"`
@@ -5663,8 +5662,8 @@ type USBSharedDevice struct {
 	Descriptor_   *USBDeviceDescriptor   `protobuf:"bytes,1,opt,name=descriptor,proto3" json:"descriptor,omitempty"`
 	BusId         string                 `protobuf:"bytes,2,opt,name=busId,proto3" json:"busId,omitempty"`
 	StableId      string                 `protobuf:"bytes,3,opt,name=stableId,proto3" json:"stableId,omitempty"`
-	Backend       USBBackend             `protobuf:"varint,4,opt,name=backend,proto3,enum=daemon.USBBackend" json:"backend,omitempty"`
-	State         USBDeviceState         `protobuf:"varint,5,opt,name=state,proto3,enum=daemon.USBDeviceState" json:"state,omitempty"`
+	Backend       USBBackend             `protobuf:"varint,4,opt,name=backend,proto3,enum=sbox.daemon.USBBackend" json:"backend,omitempty"`
+	State         USBDeviceState         `protobuf:"varint,5,opt,name=state,proto3,enum=sbox.daemon.USBDeviceState" json:"state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7398,7 +7397,7 @@ func (x *NotificationCancel) GetTypeID() int32 {
 
 type Log_Message struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Level         LogLevel               `protobuf:"varint,1,opt,name=level,proto3,enum=daemon.LogLevel" json:"level,omitempty"`
+	Level         LogLevel               `protobuf:"varint,1,opt,name=level,proto3,enum=sbox.daemon.LogLevel" json:"level,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -7452,14 +7451,14 @@ var File_daemon_started_service_proto protoreflect.FileDescriptor
 
 const file_daemon_started_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdaemon/started_service.proto\x12\x06daemon\x1a\x1bgoogle/protobuf/empty.proto\"C\n" +
+	"\x1cdaemon/started_service.proto\x12\vsbox.daemon\x1a\x1bgoogle/protobuf/empty.proto\"C\n" +
 	"\aVersion\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x1e\n" +
 	"\n" +
 	"apiVersion\x18\x02 \x01(\x05R\n" +
-	"apiVersion\"\xad\x01\n" +
-	"\rServiceStatus\x122\n" +
-	"\x06status\x18\x01 \x01(\x0e2\x1a.daemon.ServiceStatus.TypeR\x06status\x12\"\n" +
+	"apiVersion\"\xb2\x01\n" +
+	"\rServiceStatus\x127\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1f.sbox.daemon.ServiceStatus.TypeR\x06status\x12\"\n" +
 	"\ferrorMessage\x18\x02 \x01(\tR\ferrorMessage\"D\n" +
 	"\x04Type\x12\b\n" +
 	"\x04IDLE\x10\x00\x12\f\n" +
@@ -7468,15 +7467,15 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\bSTOPPING\x10\x03\x12\t\n" +
 	"\x05FATAL\x10\x04\"4\n" +
 	"\x16SubscribeStatusRequest\x12\x1a\n" +
-	"\binterval\x18\x01 \x01(\x03R\binterval\"\x99\x01\n" +
-	"\x03Log\x12/\n" +
-	"\bmessages\x18\x01 \x03(\v2\x13.daemon.Log.MessageR\bmessages\x12\x14\n" +
-	"\x05reset\x18\x02 \x01(\bR\x05reset\x1aK\n" +
-	"\aMessage\x12&\n" +
-	"\x05level\x18\x01 \x01(\x0e2\x10.daemon.LogLevelR\x05level\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"9\n" +
-	"\x0fDefaultLogLevel\x12&\n" +
-	"\x05level\x18\x01 \x01(\x0e2\x10.daemon.LogLevelR\x05level\"\xb6\x02\n" +
+	"\binterval\x18\x01 \x01(\x03R\binterval\"\xa3\x01\n" +
+	"\x03Log\x124\n" +
+	"\bmessages\x18\x01 \x03(\v2\x18.sbox.daemon.Log.MessageR\bmessages\x12\x14\n" +
+	"\x05reset\x18\x02 \x01(\bR\x05reset\x1aP\n" +
+	"\aMessage\x12+\n" +
+	"\x05level\x18\x01 \x01(\x0e2\x15.sbox.daemon.LogLevelR\x05level\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\">\n" +
+	"\x0fDefaultLogLevel\x12+\n" +
+	"\x05level\x18\x01 \x01(\x0e2\x15.sbox.daemon.LogLevelR\x05level\"\xb6\x02\n" +
 	"\x06Status\x12\x16\n" +
 	"\x06memory\x18\x01 \x01(\x04R\x06memory\x12\x1e\n" +
 	"\n" +
@@ -7488,9 +7487,9 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x06uplink\x18\x06 \x01(\x03R\x06uplink\x12\x1a\n" +
 	"\bdownlink\x18\a \x01(\x03R\bdownlink\x12 \n" +
 	"\vuplinkTotal\x18\b \x01(\x03R\vuplinkTotal\x12$\n" +
-	"\rdownlinkTotal\x18\t \x01(\x03R\rdownlinkTotal\"-\n" +
-	"\x06Groups\x12#\n" +
-	"\x05group\x18\x01 \x03(\v2\r.daemon.GroupR\x05group\"\xae\x01\n" +
+	"\rdownlinkTotal\x18\t \x01(\x03R\rdownlinkTotal\"2\n" +
+	"\x06Groups\x12(\n" +
+	"\x05group\x18\x01 \x03(\v2\x12.sbox.daemon.GroupR\x05group\"\xb3\x01\n" +
 	"\x05Group\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1e\n" +
@@ -7498,8 +7497,8 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"selectable\x18\x03 \x01(\bR\n" +
 	"selectable\x12\x1a\n" +
 	"\bselected\x18\x04 \x01(\tR\bselected\x12\x1a\n" +
-	"\bisExpand\x18\x05 \x01(\bR\bisExpand\x12'\n" +
-	"\x05items\x18\x06 \x03(\v2\x11.daemon.GroupItemR\x05items\"w\n" +
+	"\bisExpand\x18\x05 \x01(\bR\bisExpand\x12,\n" +
+	"\x05items\x18\x06 \x03(\v2\x16.sbox.daemon.GroupItemR\x05items\"w\n" +
 	"\tGroupItem\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12 \n" +
@@ -7519,19 +7518,19 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\bmodeList\x18\x01 \x03(\tR\bmodeList\x12 \n" +
 	"\vcurrentMode\x18\x02 \x01(\tR\vcurrentMode\"9\n" +
 	"\x1bSubscribeConnectionsRequest\x12\x1a\n" +
-	"\binterval\x18\x01 \x01(\x03R\binterval\"\xea\x01\n" +
-	"\x0fConnectionEvent\x12/\n" +
-	"\x04type\x18\x01 \x01(\x0e2\x1b.daemon.ConnectionEventTypeR\x04type\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\x122\n" +
+	"\binterval\x18\x01 \x01(\x03R\binterval\"\xf4\x01\n" +
+	"\x0fConnectionEvent\x124\n" +
+	"\x04type\x18\x01 \x01(\x0e2 .sbox.daemon.ConnectionEventTypeR\x04type\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x127\n" +
 	"\n" +
-	"connection\x18\x03 \x01(\v2\x12.daemon.ConnectionR\n" +
+	"connection\x18\x03 \x01(\v2\x17.sbox.daemon.ConnectionR\n" +
 	"connection\x12 \n" +
 	"\vuplinkDelta\x18\x04 \x01(\x03R\vuplinkDelta\x12$\n" +
 	"\rdownlinkDelta\x18\x05 \x01(\x03R\rdownlinkDelta\x12\x1a\n" +
-	"\bclosedAt\x18\x06 \x01(\x03R\bclosedAt\"Y\n" +
-	"\x10ConnectionEvents\x12/\n" +
-	"\x06events\x18\x01 \x03(\v2\x17.daemon.ConnectionEventR\x06events\x12\x14\n" +
-	"\x05reset\x18\x02 \x01(\bR\x05reset\"\x95\x05\n" +
+	"\bclosedAt\x18\x06 \x01(\x03R\bclosedAt\"^\n" +
+	"\x10ConnectionEvents\x124\n" +
+	"\x06events\x18\x01 \x03(\v2\x1c.sbox.daemon.ConnectionEventR\x06events\x12\x14\n" +
+	"\x05reset\x18\x02 \x01(\bR\x05reset\"\x9a\x05\n" +
 	"\n" +
 	"Connection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
@@ -7555,8 +7554,8 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x04rule\x18\x12 \x01(\tR\x04rule\x12\x1a\n" +
 	"\boutbound\x18\x13 \x01(\tR\boutbound\x12\"\n" +
 	"\foutboundType\x18\x14 \x01(\tR\foutboundType\x12\x1c\n" +
-	"\tchainList\x18\x15 \x03(\tR\tchainList\x125\n" +
-	"\vprocessInfo\x18\x16 \x01(\v2\x13.daemon.ProcessInfoR\vprocessInfo\"\xa5\x01\n" +
+	"\tchainList\x18\x15 \x03(\tR\tchainList\x12:\n" +
+	"\vprocessInfo\x18\x16 \x01(\v2\x18.sbox.daemon.ProcessInfoR\vprocessInfo\"\xa5\x01\n" +
 	"\vProcessInfo\x12\x1c\n" +
 	"\tprocessId\x18\x01 \x01(\rR\tprocessId\x12\x16\n" +
 	"\x06userId\x18\x02 \x01(\x05R\x06userId\x12\x1a\n" +
@@ -7564,9 +7563,9 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\vprocessPath\x18\x04 \x01(\tR\vprocessPath\x12\"\n" +
 	"\fpackageNames\x18\x05 \x03(\tR\fpackageNames\"(\n" +
 	"\x16CloseConnectionRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"K\n" +
-	"\x12DeprecatedWarnings\x125\n" +
-	"\bwarnings\x18\x01 \x03(\v2\x19.daemon.DeprecatedWarningR\bwarnings\"\xed\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"P\n" +
+	"\x12DeprecatedWarnings\x12:\n" +
+	"\bwarnings\x18\x01 \x03(\v2\x1e.sbox.daemon.DeprecatedWarningR\bwarnings\"\xed\x01\n" +
 	"\x11DeprecatedWarning\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12\x1c\n" +
 	"\timpending\x18\x02 \x01(\bR\timpending\x12$\n" +
@@ -7575,9 +7574,9 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x11deprecatedVersion\x18\x05 \x01(\tR\x11deprecatedVersion\x12*\n" +
 	"\x10scheduledVersion\x18\x06 \x01(\tR\x10scheduledVersion\")\n" +
 	"\tStartedAt\x12\x1c\n" +
-	"\tstartedAt\x18\x01 \x01(\x03R\tstartedAt\"?\n" +
-	"\fOutboundList\x12/\n" +
-	"\toutbounds\x18\x01 \x03(\v2\x11.daemon.GroupItemR\toutbounds\"\xb7\x01\n" +
+	"\tstartedAt\x18\x01 \x01(\x03R\tstartedAt\"D\n" +
+	"\fOutboundList\x124\n" +
+	"\toutbounds\x18\x01 \x03(\v2\x16.sbox.daemon.GroupItemR\toutbounds\"\xb7\x01\n" +
 	"\x19NetworkQualityTestRequest\x12\x1c\n" +
 	"\tconfigURL\x18\x01 \x01(\tR\tconfigURL\x12 \n" +
 	"\voutboundTag\x18\x02 \x01(\tR\voutboundTag\x12\x16\n" +
@@ -7612,34 +7611,34 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\fnatFiltering\x18\x05 \x01(\x05R\fnatFiltering\x12\x18\n" +
 	"\aisFinal\x18\x06 \x01(\bR\aisFinal\x12\x14\n" +
 	"\x05error\x18\a \x01(\tR\x05error\x12*\n" +
-	"\x10natTypeSupported\x18\b \x01(\bR\x10natTypeSupported\"V\n" +
-	"\x15TailscaleStatusUpdate\x12=\n" +
-	"\tendpoints\x18\x01 \x03(\v2\x1f.daemon.TailscaleEndpointStatusR\tendpoints\"\xe3\x04\n" +
+	"\x10natTypeSupported\x18\b \x01(\bR\x10natTypeSupported\"[\n" +
+	"\x15TailscaleStatusUpdate\x12B\n" +
+	"\tendpoints\x18\x01 \x03(\v2$.sbox.daemon.TailscaleEndpointStatusR\tendpoints\"\xf2\x04\n" +
 	"\x17TailscaleEndpointStatus\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12\"\n" +
 	"\fbackendState\x18\x02 \x01(\tR\fbackendState\x12\x1c\n" +
 	"\tstateText\x18\x03 \x01(\tR\tstateText\x12\x18\n" +
 	"\aauthURL\x18\x04 \x01(\tR\aauthURL\x12 \n" +
 	"\vnetworkName\x18\x05 \x01(\tR\vnetworkName\x12&\n" +
-	"\x0emagicDNSSuffix\x18\x06 \x01(\tR\x0emagicDNSSuffix\x12)\n" +
-	"\x04self\x18\a \x01(\v2\x15.daemon.TailscalePeerR\x04self\x12:\n" +
+	"\x0emagicDNSSuffix\x18\x06 \x01(\tR\x0emagicDNSSuffix\x12.\n" +
+	"\x04self\x18\a \x01(\v2\x1a.sbox.daemon.TailscalePeerR\x04self\x12?\n" +
 	"\n" +
-	"userGroups\x18\b \x03(\v2\x1a.daemon.TailscaleUserGroupR\n" +
-	"userGroups\x121\n" +
-	"\bexitNode\x18\t \x01(\v2\x15.daemon.TailscalePeerR\bexitNode\x12\x18\n" +
+	"userGroups\x18\b \x03(\v2\x1f.sbox.daemon.TailscaleUserGroupR\n" +
+	"userGroups\x126\n" +
+	"\bexitNode\x18\t \x01(\v2\x1a.sbox.daemon.TailscalePeerR\bexitNode\x12\x18\n" +
 	"\akeyAuth\x18\n" +
 	" \x01(\bR\akeyAuth\x12$\n" +
 	"\rcanShareFiles\x18\v \x01(\bR\rcanShareFiles\x12*\n" +
 	"\x10waitingFileCount\x18\f \x01(\x05R\x10waitingFileCount\x12.\n" +
 	"\x12receivingFileCount\x18\r \x01(\x05R\x12receivingFileCount\x12(\n" +
 	"\x0funreadFileCount\x18\x0e \x01(\x05R\x0funreadFileCount\x12 \n" +
-	"\vcertDomains\x18\x0f \x03(\tR\vcertDomains\"\xbf\x01\n" +
+	"\vcertDomains\x18\x0f \x03(\tR\vcertDomains\"\xc4\x01\n" +
 	"\x12TailscaleUserGroup\x12\x16\n" +
 	"\x06userID\x18\x01 \x01(\x03R\x06userID\x12\x1c\n" +
 	"\tloginName\x18\x02 \x01(\tR\tloginName\x12 \n" +
 	"\vdisplayName\x18\x03 \x01(\tR\vdisplayName\x12$\n" +
-	"\rprofilePicURL\x18\x04 \x01(\tR\rprofilePicURL\x12+\n" +
-	"\x05peers\x18\x05 \x03(\v2\x15.daemon.TailscalePeerR\x05peers\"\xfd\x03\n" +
+	"\rprofilePicURL\x18\x04 \x01(\tR\rprofilePicURL\x120\n" +
+	"\x05peers\x18\x05 \x03(\v2\x1a.sbox.daemon.TailscalePeerR\x05peers\"\xfd\x03\n" +
 	"\rTailscalePeer\x12\x1a\n" +
 	"\bhostName\x18\x01 \x01(\tR\bhostName\x12\x18\n" +
 	"\adnsName\x18\x02 \x01(\tR\adnsName\x12\x0e\n" +
@@ -7683,11 +7682,11 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x12minValiditySeconds\x18\x03 \x01(\x03R\x12minValiditySeconds\"d\n" +
 	"\x14TailscaleCertificate\x12&\n" +
 	"\x0ecertificatePEM\x18\x01 \x01(\fR\x0ecertificatePEM\x12$\n" +
-	"\rprivateKeyPEM\x18\x02 \x01(\fR\rprivateKeyPEM\"\xc2\x01\n" +
-	"\x19TailscaleSSHClientMessage\x121\n" +
-	"\x05start\x18\x01 \x01(\v2\x19.daemon.TailscaleSSHStartH\x00R\x05start\x121\n" +
-	"\x05input\x18\x02 \x01(\v2\x19.daemon.TailscaleSSHInputH\x00R\x05input\x124\n" +
-	"\x06resize\x18\x03 \x01(\v2\x1a.daemon.TailscaleSSHResizeH\x00R\x06resizeB\t\n" +
+	"\rprivateKeyPEM\x18\x02 \x01(\fR\rprivateKeyPEM\"\xd1\x01\n" +
+	"\x19TailscaleSSHClientMessage\x126\n" +
+	"\x05start\x18\x01 \x01(\v2\x1e.sbox.daemon.TailscaleSSHStartH\x00R\x05start\x126\n" +
+	"\x05input\x18\x02 \x01(\v2\x1e.sbox.daemon.TailscaleSSHInputH\x00R\x05input\x129\n" +
+	"\x06resize\x18\x03 \x01(\v2\x1f.sbox.daemon.TailscaleSSHResizeH\x00R\x06resizeB\t\n" +
 	"\amessage\"\xcc\x02\n" +
 	"\x11TailscaleSSHStart\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12 \n" +
@@ -7707,15 +7706,15 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\acolumns\x18\x01 \x01(\x05R\acolumns\x12\x12\n" +
 	"\x04rows\x18\x02 \x01(\x05R\x04rows\x12 \n" +
 	"\vwidthPixels\x18\x03 \x01(\x05R\vwidthPixels\x12\"\n" +
-	"\fheightPixels\x18\x04 \x01(\x05R\fheightPixels\"\xb4\x02\n" +
-	"\x19TailscaleSSHServerMessage\x12@\n" +
+	"\fheightPixels\x18\x04 \x01(\x05R\fheightPixels\"\xcd\x02\n" +
+	"\x19TailscaleSSHServerMessage\x12E\n" +
 	"\n" +
-	"authBanner\x18\x01 \x01(\v2\x1e.daemon.TailscaleSSHAuthBannerH\x00R\n" +
-	"authBanner\x121\n" +
-	"\x05ready\x18\x02 \x01(\v2\x19.daemon.TailscaleSSHReadyH\x00R\x05ready\x124\n" +
-	"\x06output\x18\x03 \x01(\v2\x1a.daemon.TailscaleSSHOutputH\x00R\x06output\x12.\n" +
-	"\x04exit\x18\x04 \x01(\v2\x18.daemon.TailscaleSSHExitH\x00R\x04exit\x121\n" +
-	"\x05error\x18\x05 \x01(\v2\x19.daemon.TailscaleSSHErrorH\x00R\x05errorB\t\n" +
+	"authBanner\x18\x01 \x01(\v2#.sbox.daemon.TailscaleSSHAuthBannerH\x00R\n" +
+	"authBanner\x126\n" +
+	"\x05ready\x18\x02 \x01(\v2\x1e.sbox.daemon.TailscaleSSHReadyH\x00R\x05ready\x129\n" +
+	"\x06output\x18\x03 \x01(\v2\x1f.sbox.daemon.TailscaleSSHOutputH\x00R\x06output\x123\n" +
+	"\x04exit\x18\x04 \x01(\v2\x1d.sbox.daemon.TailscaleSSHExitH\x00R\x04exit\x126\n" +
+	"\x05error\x18\x05 \x01(\v2\x1e.sbox.daemon.TailscaleSSHErrorH\x00R\x05errorB\t\n" +
 	"\amessage\"2\n" +
 	"\x16TailscaleSSHAuthBanner\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\x13\n" +
@@ -7731,11 +7730,11 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x1dSubscribeTaildropInboxRequest\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\"@\n" +
 	"\x1cMarkTaildropInboxReadRequest\x12 \n" +
-	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\"\x9a\x01\n" +
+	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\"\xa4\x01\n" +
 	"\rTaildropInbox\x12 \n" +
-	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12*\n" +
-	"\x05files\x18\x02 \x03(\v2\x14.daemon.TaildropFileR\x05files\x12;\n" +
-	"\treceiving\x18\x03 \x03(\v2\x1d.daemon.TaildropReceivingFileR\treceiving\"v\n" +
+	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12/\n" +
+	"\x05files\x18\x02 \x03(\v2\x19.sbox.daemon.TaildropFileR\x05files\x12@\n" +
+	"\treceiving\x18\x03 \x03(\v2\".sbox.daemon.TaildropReceivingFileR\treceiving\"v\n" +
 	"\fTaildropFile\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x1e\n" +
@@ -7752,24 +7751,24 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\bsenderID\x18\x04 \x01(\tR\bsenderID\x12\x1e\n" +
 	"\n" +
 	"senderName\x18\x05 \x01(\tR\n" +
-	"senderName\"\xc4\x01\n" +
-	"\x19TaildropSendClientMessage\x121\n" +
-	"\x05start\x18\x01 \x01(\v2\x19.daemon.TaildropSendStartH\x00R\x05start\x121\n" +
-	"\x05chunk\x18\x02 \x01(\v2\x19.daemon.TaildropFileChunkH\x00R\x05chunk\x126\n" +
-	"\bfileDone\x18\x03 \x01(\v2\x18.daemon.TaildropFileDoneH\x00R\bfileDoneB\t\n" +
-	"\amessage\"\x8d\x01\n" +
+	"senderName\"\xd3\x01\n" +
+	"\x19TaildropSendClientMessage\x126\n" +
+	"\x05start\x18\x01 \x01(\v2\x1e.sbox.daemon.TaildropSendStartH\x00R\x05start\x126\n" +
+	"\x05chunk\x18\x02 \x01(\v2\x1e.sbox.daemon.TaildropFileChunkH\x00R\x05chunk\x12;\n" +
+	"\bfileDone\x18\x03 \x01(\v2\x1d.sbox.daemon.TaildropFileDoneH\x00R\bfileDoneB\t\n" +
+	"\amessage\"\x92\x01\n" +
 	"\x11TaildropSendStart\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12\"\n" +
-	"\fpeerStableID\x18\x02 \x01(\tR\fpeerStableID\x122\n" +
-	"\x05files\x18\x03 \x03(\v2\x1c.daemon.TaildropOutgoingFileR\x05files\">\n" +
+	"\fpeerStableID\x18\x02 \x01(\tR\fpeerStableID\x127\n" +
+	"\x05files\x18\x03 \x03(\v2!.sbox.daemon.TaildropOutgoingFileR\x05files\">\n" +
 	"\x14TaildropOutgoingFile\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\"'\n" +
 	"\x11TaildropFileChunk\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\"\x12\n" +
-	"\x10TaildropFileDone\"\x8a\x01\n" +
-	"\x19TaildropSendServerMessage\x12:\n" +
-	"\bprogress\x18\x01 \x01(\v2\x1c.daemon.TaildropSendProgressH\x00R\bprogress\x12&\n" +
+	"\x10TaildropFileDone\"\x8f\x01\n" +
+	"\x19TaildropSendServerMessage\x12?\n" +
+	"\bprogress\x18\x01 \x01(\v2!.sbox.daemon.TaildropSendProgressH\x00R\bprogress\x12&\n" +
 	"\rreceivedBytes\x18\x02 \x01(\x03H\x00R\rreceivedBytesB\t\n" +
 	"\amessage\"x\n" +
 	"\x14TaildropSendProgress\x12\x1c\n" +
@@ -7788,20 +7787,20 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x1eCancelTaildropReceivingRequest\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12\x1a\n" +
 	"\bsenderID\x18\x02 \x01(\tR\bsenderID\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\"\xc1\x01\n" +
-	"\x12USBProviderMessage\x121\n" +
-	"\x06attach\x18\x01 \x01(\v2\x17.daemon.USBDeviceAttachH\x00R\x06attach\x121\n" +
-	"\x06detach\x18\x02 \x01(\v2\x17.daemon.USBDeviceDetachH\x00R\x06detach\x12:\n" +
-	"\vurbResponse\x18\x03 \x01(\v2\x16.daemon.USBURBResponseH\x00R\vurbResponseB\t\n" +
-	"\amessage\"\xe2\x01\n" +
-	"\x10USBServerMessage\x12.\n" +
-	"\x05ready\x18\x01 \x01(\v2\x16.daemon.USBDeviceReadyH\x00R\x05ready\x127\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"\xd0\x01\n" +
+	"\x12USBProviderMessage\x126\n" +
+	"\x06attach\x18\x01 \x01(\v2\x1c.sbox.daemon.USBDeviceAttachH\x00R\x06attach\x126\n" +
+	"\x06detach\x18\x02 \x01(\v2\x1c.sbox.daemon.USBDeviceDetachH\x00R\x06detach\x12?\n" +
+	"\vurbResponse\x18\x03 \x01(\v2\x1b.sbox.daemon.USBURBResponseH\x00R\vurbResponseB\t\n" +
+	"\amessage\"\xf6\x01\n" +
+	"\x10USBServerMessage\x123\n" +
+	"\x05ready\x18\x01 \x01(\v2\x1b.sbox.daemon.USBDeviceReadyH\x00R\x05ready\x12<\n" +
 	"\n" +
-	"urbRequest\x18\x02 \x01(\v2\x15.daemon.USBURBRequestH\x00R\n" +
-	"urbRequest\x120\n" +
-	"\x05abort\x18\x03 \x01(\v2\x18.daemon.USBEndpointAbortH\x00R\x05abort\x12(\n" +
-	"\x05error\x18\x04 \x01(\v2\x10.daemon.USBErrorH\x00R\x05errorB\t\n" +
-	"\amessage\"\x87\x04\n" +
+	"urbRequest\x18\x02 \x01(\v2\x1a.sbox.daemon.USBURBRequestH\x00R\n" +
+	"urbRequest\x125\n" +
+	"\x05abort\x18\x03 \x01(\v2\x1d.sbox.daemon.USBEndpointAbortH\x00R\x05abort\x12-\n" +
+	"\x05error\x18\x04 \x01(\v2\x15.sbox.daemon.USBErrorH\x00R\x05errorB\t\n" +
+	"\amessage\"\x8c\x04\n" +
 	"\x13USBDeviceDescriptor\x12\x1a\n" +
 	"\bdeviceId\x18\x01 \x01(\tR\bdeviceId\x12\x16\n" +
 	"\x06busNum\x18\x02 \x01(\rR\x06busNum\x12\x16\n" +
@@ -7815,16 +7814,16 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x0edeviceProtocol\x18\n" +
 	" \x01(\rR\x0edeviceProtocol\x12.\n" +
 	"\x12configurationValue\x18\v \x01(\rR\x12configurationValue\x12,\n" +
-	"\x11numConfigurations\x18\f \x01(\rR\x11numConfigurations\x124\n" +
+	"\x11numConfigurations\x18\f \x01(\rR\x11numConfigurations\x129\n" +
 	"\n" +
-	"interfaces\x18\r \x03(\v2\x14.daemon.USBInterfaceR\n" +
+	"interfaces\x18\r \x03(\v2\x19.sbox.daemon.USBInterfaceR\n" +
 	"interfaces\x12\x16\n" +
 	"\x06serial\x18\x0e \x01(\tR\x06serial\x12\x18\n" +
-	"\aproduct\x18\x0f \x01(\tR\aproduct\"l\n" +
+	"\aproduct\x18\x0f \x01(\tR\aproduct\"q\n" +
 	"\x0fUSBDeviceAttach\x12\x1c\n" +
-	"\tserverTag\x18\x01 \x01(\tR\tserverTag\x12;\n" +
+	"\tserverTag\x18\x01 \x01(\tR\tserverTag\x12@\n" +
 	"\n" +
-	"descriptor\x18\x02 \x01(\v2\x1b.daemon.USBDeviceDescriptorR\n" +
+	"descriptor\x18\x02 \x01(\v2 .sbox.daemon.USBDeviceDescriptorR\n" +
 	"descriptor\"\x92\x01\n" +
 	"\fUSBInterface\x12&\n" +
 	"\x0einterfaceClass\x18\x01 \x01(\rR\x0einterfaceClass\x12,\n" +
@@ -7834,7 +7833,7 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\bdeviceId\x18\x01 \x01(\tR\bdeviceId\"B\n" +
 	"\x0eUSBDeviceReady\x12\x1a\n" +
 	"\bdeviceId\x18\x01 \x01(\tR\bdeviceId\x12\x14\n" +
-	"\x05busId\x18\x02 \x01(\tR\x05busId\"\xa1\x03\n" +
+	"\x05busId\x18\x02 \x01(\tR\x05busId\"\xa6\x03\n" +
 	"\rUSBURBRequest\x12\x1a\n" +
 	"\bdeviceId\x18\x01 \x01(\tR\bdeviceId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12\x1a\n" +
@@ -7849,18 +7848,18 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"startFrame\x18\n" +
 	" \x01(\x05R\n" +
 	"startFrame\x12\x1a\n" +
-	"\binterval\x18\v \x01(\x05R\binterval\x124\n" +
+	"\binterval\x18\v \x01(\x05R\binterval\x129\n" +
 	"\n" +
-	"isoPackets\x18\f \x03(\v2\x14.daemon.USBIsoPacketR\n" +
-	"isoPackets\"\xc8\x01\n" +
+	"isoPackets\x18\f \x03(\v2\x19.sbox.daemon.USBIsoPacketR\n" +
+	"isoPackets\"\xcd\x01\n" +
 	"\x0eUSBURBResponse\x12\x1a\n" +
 	"\bdeviceId\x18\x01 \x01(\tR\bdeviceId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12\x16\n" +
 	"\x06status\x18\x03 \x01(\x05R\x06status\x12\"\n" +
 	"\factualLength\x18\x04 \x01(\x05R\factualLength\x12\x16\n" +
-	"\x06inData\x18\x05 \x01(\fR\x06inData\x124\n" +
+	"\x06inData\x18\x05 \x01(\fR\x06inData\x129\n" +
 	"\n" +
-	"isoPackets\x18\x06 \x03(\v2\x14.daemon.USBIsoPacketR\n" +
+	"isoPackets\x18\x06 \x03(\v2\x19.sbox.daemon.USBIsoPacketR\n" +
 	"isoPackets\"z\n" +
 	"\fUSBIsoPacket\x12\x16\n" +
 	"\x06offset\x18\x01 \x01(\x05R\x06offset\x12\x16\n" +
@@ -7872,30 +7871,30 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\bendpoint\x18\x02 \x01(\rR\bendpoint\"@\n" +
 	"\bUSBError\x12\x1a\n" +
 	"\bdeviceId\x18\x01 \x01(\tR\bdeviceId\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"N\n" +
-	"\x17USBIPServerStatusUpdate\x123\n" +
-	"\aservers\x18\x01 \x03(\v2\x19.daemon.USBIPServerStatusR\aservers\"d\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"S\n" +
+	"\x17USBIPServerStatusUpdate\x128\n" +
+	"\aservers\x18\x01 \x03(\v2\x1e.sbox.daemon.USBIPServerStatusR\aservers\"i\n" +
 	"\x11USBIPServerStatus\x12\x1c\n" +
-	"\tserverTag\x18\x01 \x01(\tR\tserverTag\x121\n" +
-	"\adevices\x18\x02 \x03(\v2\x17.daemon.USBSharedDeviceR\adevices\"\xdc\x01\n" +
-	"\x0fUSBSharedDevice\x12;\n" +
+	"\tserverTag\x18\x01 \x01(\tR\tserverTag\x126\n" +
+	"\adevices\x18\x02 \x03(\v2\x1c.sbox.daemon.USBSharedDeviceR\adevices\"\xeb\x01\n" +
+	"\x0fUSBSharedDevice\x12@\n" +
 	"\n" +
-	"descriptor\x18\x01 \x01(\v2\x1b.daemon.USBDeviceDescriptorR\n" +
+	"descriptor\x18\x01 \x01(\v2 .sbox.daemon.USBDeviceDescriptorR\n" +
 	"descriptor\x12\x14\n" +
 	"\x05busId\x18\x02 \x01(\tR\x05busId\x12\x1a\n" +
-	"\bstableId\x18\x03 \x01(\tR\bstableId\x12,\n" +
-	"\abackend\x18\x04 \x01(\x0e2\x12.daemon.USBBackendR\abackend\x12,\n" +
-	"\x05state\x18\x05 \x01(\x0e2\x16.daemon.USBDeviceStateR\x05state\"Z\n" +
-	"\x17OpenConnectStatusUpdate\x12?\n" +
-	"\tendpoints\x18\x01 \x03(\v2!.daemon.OpenConnectEndpointStatusR\tendpoints\"\x8e\x02\n" +
+	"\bstableId\x18\x03 \x01(\tR\bstableId\x121\n" +
+	"\abackend\x18\x04 \x01(\x0e2\x17.sbox.daemon.USBBackendR\abackend\x121\n" +
+	"\x05state\x18\x05 \x01(\x0e2\x1b.sbox.daemon.USBDeviceStateR\x05state\"_\n" +
+	"\x17OpenConnectStatusUpdate\x12D\n" +
+	"\tendpoints\x18\x01 \x03(\v2&.sbox.daemon.OpenConnectEndpointStatusR\tendpoints\"\x98\x02\n" +
 	"\x19OpenConnectEndpointStatus\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12\x14\n" +
 	"\x05state\x18\x02 \x01(\tR\x05state\x12\x1c\n" +
-	"\tstateText\x18\x03 \x01(\tR\tstateText\x12F\n" +
-	"\rauthChallenge\x18\x04 \x01(\v2 .daemon.OpenConnectAuthChallengeR\rauthChallenge\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\x12=\n" +
+	"\tstateText\x18\x03 \x01(\tR\tstateText\x12K\n" +
+	"\rauthChallenge\x18\x04 \x01(\v2%.sbox.daemon.OpenConnectAuthChallengeR\rauthChallenge\x12\x14\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\x12B\n" +
 	"\n" +
-	"tunnelInfo\x18\x06 \x01(\v2\x1d.daemon.OpenConnectTunnelInfoR\n" +
+	"tunnelInfo\x18\x06 \x01(\v2\".sbox.daemon.OpenConnectTunnelInfoR\n" +
 	"tunnelInfo\"\xd9\x01\n" +
 	"\x15OpenConnectTunnelInfo\x12\x16\n" +
 	"\x06server\x18\x01 \x01(\tR\x06server\x12\x16\n" +
@@ -7905,24 +7904,24 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x04ipv6\x18\x05 \x03(\tR\x04ipv6\x12\x10\n" +
 	"\x03dns\x18\x06 \x03(\tR\x03dns\x12\x10\n" +
 	"\x03mtu\x18\a \x01(\rR\x03mtu\x12&\n" +
-	"\x0econnectedSince\x18\b \x01(\x03R\x0econnectedSince\"\xf1\x01\n" +
+	"\x0econnectedSince\x18\b \x01(\x03R\x0econnectedSince\"\xfb\x01\n" +
 	"\x18OpenConnectAuthChallenge\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06banner\x18\x02 \x01(\tR\x06banner\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\x121\n" +
-	"\x04form\x18\x05 \x01(\v2\x1b.daemon.OpenConnectAuthFormH\x00R\x04form\x12=\n" +
-	"\abrowser\x18\x06 \x01(\v2!.daemon.OpenConnectBrowserRequestH\x00R\abrowserB\v\n" +
-	"\tchallenge\"O\n" +
-	"\x13OpenConnectAuthForm\x128\n" +
-	"\x06fields\x18\x01 \x03(\v2 .daemon.OpenConnectAuthFormFieldR\x06fields\"\xd1\x01\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x126\n" +
+	"\x04form\x18\x05 \x01(\v2 .sbox.daemon.OpenConnectAuthFormH\x00R\x04form\x12B\n" +
+	"\abrowser\x18\x06 \x01(\v2&.sbox.daemon.OpenConnectBrowserRequestH\x00R\abrowserB\v\n" +
+	"\tchallenge\"T\n" +
+	"\x13OpenConnectAuthForm\x12=\n" +
+	"\x06fields\x18\x01 \x03(\v2%.sbox.daemon.OpenConnectAuthFormFieldR\x06fields\"\xd6\x01\n" +
 	"\x18OpenConnectAuthFormField\x12$\n" +
 	"\rsubmissionKey\x18\x01 \x01(\tR\rsubmissionKey\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
 	"\x05label\x18\x03 \x01(\tR\x05label\x12\x12\n" +
 	"\x04kind\x18\x04 \x01(\tR\x04kind\x12\x14\n" +
-	"\x05value\x18\x05 \x01(\tR\x05value\x12;\n" +
-	"\aoptions\x18\x06 \x03(\v2!.daemon.OpenConnectAuthFormChoiceR\aoptions\"G\n" +
+	"\x05value\x18\x05 \x01(\tR\x05value\x12@\n" +
+	"\aoptions\x18\x06 \x03(\v2&.sbox.daemon.OpenConnectAuthFormChoiceR\aoptions\"G\n" +
 	"\x19OpenConnectAuthFormChoice\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\"\x85\x02\n" +
@@ -7939,36 +7938,36 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value\"F\n" +
 	"\x18OpenConnectBrowserHeader\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06values\x18\x02 \x03(\tR\x06values\"\xa1\x01\n" +
-	"\x1bOpenConnectAuthFormResponse\x12G\n" +
-	"\x06values\x18\x01 \x03(\v2/.daemon.OpenConnectAuthFormResponse.ValuesEntryR\x06values\x1a9\n" +
+	"\x06values\x18\x02 \x03(\tR\x06values\"\xa6\x01\n" +
+	"\x1bOpenConnectAuthFormResponse\x12L\n" +
+	"\x06values\x18\x01 \x03(\v24.sbox.daemon.OpenConnectAuthFormResponse.ValuesEntryR\x06values\x1a9\n" +
 	"\vValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xae\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb8\x01\n" +
 	"\x18OpenConnectBrowserResult\x12\x1a\n" +
-	"\bfinalURL\x18\x01 \x01(\tR\bfinalURL\x12:\n" +
-	"\acookies\x18\x02 \x03(\v2 .daemon.OpenConnectBrowserCookieR\acookies\x12:\n" +
-	"\aheaders\x18\x03 \x03(\v2 .daemon.OpenConnectBrowserHeaderR\aheaders\"\xec\x01\n" +
+	"\bfinalURL\x18\x01 \x01(\tR\bfinalURL\x12?\n" +
+	"\acookies\x18\x02 \x03(\v2%.sbox.daemon.OpenConnectBrowserCookieR\acookies\x12?\n" +
+	"\aheaders\x18\x03 \x03(\v2%.sbox.daemon.OpenConnectBrowserHeaderR\aheaders\"\xf6\x01\n" +
 	"!OpenConnectAuthResponseSubmission\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12 \n" +
-	"\vchallengeID\x18\x02 \x01(\tR\vchallengeID\x129\n" +
-	"\x04form\x18\x03 \x01(\v2#.daemon.OpenConnectAuthFormResponseH\x00R\x04form\x12<\n" +
-	"\abrowser\x18\x04 \x01(\v2 .daemon.OpenConnectBrowserResultH\x00R\abrowserB\n" +
+	"\vchallengeID\x18\x02 \x01(\tR\vchallengeID\x12>\n" +
+	"\x04form\x18\x03 \x01(\v2(.sbox.daemon.OpenConnectAuthFormResponseH\x00R\x04form\x12A\n" +
+	"\abrowser\x18\x04 \x01(\v2%.sbox.daemon.OpenConnectBrowserResultH\x00R\abrowserB\n" +
 	"\n" +
 	"\bresponse\"d\n" +
 	"\x1eOpenConnectAuthChallengeCancel\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12 \n" +
-	"\vchallengeID\x18\x02 \x01(\tR\vchallengeID\"R\n" +
-	"\x13OpenVPNStatusUpdate\x12;\n" +
-	"\tendpoints\x18\x01 \x03(\v2\x1d.daemon.OpenVPNEndpointStatusR\tendpoints\"\xf6\x01\n" +
+	"\vchallengeID\x18\x02 \x01(\tR\vchallengeID\"W\n" +
+	"\x13OpenVPNStatusUpdate\x12@\n" +
+	"\tendpoints\x18\x01 \x03(\v2\".sbox.daemon.OpenVPNEndpointStatusR\tendpoints\"\x80\x02\n" +
 	"\x15OpenVPNEndpointStatus\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12\x14\n" +
 	"\x05state\x18\x02 \x01(\tR\x05state\x12\x1c\n" +
-	"\tstateText\x18\x03 \x01(\tR\tstateText\x126\n" +
-	"\tchallenge\x18\x04 \x01(\v2\x18.daemon.OpenVPNChallengeR\tchallenge\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\x129\n" +
+	"\tstateText\x18\x03 \x01(\tR\tstateText\x12;\n" +
+	"\tchallenge\x18\x04 \x01(\v2\x1d.sbox.daemon.OpenVPNChallengeR\tchallenge\x12\x14\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\x12>\n" +
 	"\n" +
-	"tunnelInfo\x18\x06 \x01(\v2\x19.daemon.OpenVPNTunnelInfoR\n" +
+	"tunnelInfo\x18\x06 \x01(\v2\x1e.sbox.daemon.OpenVPNTunnelInfoR\n" +
 	"tunnelInfo\"\xd7\x01\n" +
 	"\x11OpenVPNTunnelInfo\x12\x16\n" +
 	"\x06server\x18\x01 \x01(\tR\x06server\x12\x18\n" +
@@ -7997,10 +7996,10 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x06secret\x18\x05 \x01(\tR\x06secret\"\\\n" +
 	"\x16OpenVPNChallengeCancel\x12 \n" +
 	"\vendpointTag\x18\x01 \x01(\tR\vendpointTag\x12 \n" +
-	"\vchallengeID\x18\x02 \x01(\tR\vchallengeID\"~\n" +
-	"\x11NotificationEvent\x12*\n" +
-	"\x04send\x18\x01 \x01(\v2\x14.daemon.NotificationH\x00R\x04send\x124\n" +
-	"\x06cancel\x18\x02 \x01(\v2\x1a.daemon.NotificationCancelH\x00R\x06cancelB\a\n" +
+	"\vchallengeID\x18\x02 \x01(\tR\vchallengeID\"\x88\x01\n" +
+	"\x11NotificationEvent\x12/\n" +
+	"\x04send\x18\x01 \x01(\v2\x19.sbox.daemon.NotificationH\x00R\x04send\x129\n" +
+	"\x06cancel\x18\x02 \x01(\v2\x1f.sbox.daemon.NotificationCancelH\x00R\x06cancelB\a\n" +
 	"\x05event\"\xc2\x01\n" +
 	"\fNotification\x12\x1e\n" +
 	"\n" +
@@ -8039,51 +8038,51 @@ const file_daemon_started_service_proto_rawDesc = "" +
 	"\x17USB_BACKEND_LINUX_SYSFS\x10\x01\x12\x17\n" +
 	"\x13USB_BACKEND_DYNAMIC\x10\x02\x12\x1c\n" +
 	"\x18USB_BACKEND_DARWIN_IOKIT\x10\x03\x12\x1f\n" +
-	"\x1bUSB_BACKEND_WINDOWS_VBOXUSB\x10\x042\xdb\x1a\n" +
-	"\x0eStartedService\x127\n" +
+	"\x1bUSB_BACKEND_WINDOWS_VBOXUSB\x10\x042\xda\x1c\n" +
+	"\x0eStartedService\x12<\n" +
 	"\n" +
-	"GetVersion\x12\x16.google.protobuf.Empty\x1a\x0f.daemon.Version\"\x00\x12K\n" +
-	"\x16SubscribeServiceStatus\x12\x16.google.protobuf.Empty\x1a\x15.daemon.ServiceStatus\"\x000\x01\x127\n" +
-	"\fSubscribeLog\x12\x16.google.protobuf.Empty\x1a\v.daemon.Log\"\x000\x01\x12G\n" +
-	"\x12GetDefaultLogLevel\x12\x16.google.protobuf.Empty\x1a\x17.daemon.DefaultLogLevel\"\x00\x12=\n" +
-	"\tClearLogs\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\"\x00\x12E\n" +
-	"\x0fSubscribeStatus\x12\x1e.daemon.SubscribeStatusRequest\x1a\x0e.daemon.Status\"\x000\x01\x12=\n" +
-	"\x0fSubscribeGroups\x12\x16.google.protobuf.Empty\x1a\x0e.daemon.Groups\"\x000\x01\x12G\n" +
-	"\x12GetClashModeStatus\x12\x16.google.protobuf.Empty\x1a\x17.daemon.ClashModeStatus\"\x00\x12C\n" +
-	"\x12SubscribeClashMode\x12\x16.google.protobuf.Empty\x1a\x11.daemon.ClashMode\"\x000\x01\x12;\n" +
-	"\fSetClashMode\x12\x11.daemon.ClashMode\x1a\x16.google.protobuf.Empty\"\x00\x12;\n" +
-	"\aURLTest\x12\x16.daemon.URLTestRequest\x1a\x16.google.protobuf.Empty\"\x00\x12I\n" +
-	"\x0eSelectOutbound\x12\x1d.daemon.SelectOutboundRequest\x1a\x16.google.protobuf.Empty\"\x00\x12I\n" +
-	"\x0eSetGroupExpand\x12\x1d.daemon.SetGroupExpandRequest\x1a\x16.google.protobuf.Empty\"\x00\x12Y\n" +
-	"\x14SubscribeConnections\x12#.daemon.SubscribeConnectionsRequest\x1a\x18.daemon.ConnectionEvents\"\x000\x01\x12K\n" +
-	"\x0fCloseConnection\x12\x1e.daemon.CloseConnectionRequest\x1a\x16.google.protobuf.Empty\"\x00\x12G\n" +
-	"\x13CloseAllConnections\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\"\x00\x12M\n" +
-	"\x15GetDeprecatedWarnings\x12\x16.google.protobuf.Empty\x1a\x1a.daemon.DeprecatedWarnings\"\x00\x12;\n" +
-	"\fGetStartedAt\x12\x16.google.protobuf.Empty\x1a\x11.daemon.StartedAt\"\x00\x12F\n" +
-	"\x12SubscribeOutbounds\x12\x16.google.protobuf.Empty\x1a\x14.daemon.OutboundList\"\x000\x01\x12d\n" +
-	"\x17StartNetworkQualityTest\x12!.daemon.NetworkQualityTestRequest\x1a\".daemon.NetworkQualityTestProgress\"\x000\x01\x12F\n" +
-	"\rStartSTUNTest\x12\x17.daemon.STUNTestRequest\x1a\x18.daemon.STUNTestProgress\"\x000\x01\x12U\n" +
-	"\x18SubscribeTailscaleStatus\x12\x16.google.protobuf.Empty\x1a\x1d.daemon.TailscaleStatusUpdate\"\x000\x01\x12U\n" +
-	"\x12StartTailscalePing\x12\x1c.daemon.TailscalePingRequest\x1a\x1d.daemon.TailscalePingResponse\"\x000\x01\x12U\n" +
-	"\x14SetTailscaleExitNode\x12#.daemon.SetTailscaleExitNodeRequest\x1a\x16.google.protobuf.Empty\"\x00\x12K\n" +
-	"\x0fTailscaleLogout\x12\x1e.daemon.TailscaleLogoutRequest\x1a\x16.google.protobuf.Empty\"\x00\x12^\n" +
-	"\x17GetTailscaleCertificate\x12#.daemon.TailscaleCertificateRequest\x1a\x1c.daemon.TailscaleCertificate\"\x00\x12f\n" +
-	"\x18StartTailscaleSSHSession\x12!.daemon.TailscaleSSHClientMessage\x1a!.daemon.TailscaleSSHServerMessage\"\x00(\x010\x01\x12Z\n" +
-	"\x16SubscribeTaildropInbox\x12%.daemon.SubscribeTaildropInboxRequest\x1a\x15.daemon.TaildropInbox\"\x000\x01\x12W\n" +
-	"\x15MarkTaildropInboxRead\x12$.daemon.MarkTaildropInboxReadRequest\x1a\x16.google.protobuf.Empty\"\x00\x12_\n" +
-	"\x11SendTaildropFiles\x12!.daemon.TaildropSendClientMessage\x1a!.daemon.TaildropSendServerMessage\"\x00(\x010\x01\x12b\n" +
-	"\x14DownloadTaildropFile\x12#.daemon.DownloadTaildropFileRequest\x1a!.daemon.DownloadTaildropFileChunk\"\x000\x01\x12Q\n" +
-	"\x12DeleteTaildropFile\x12!.daemon.DeleteTaildropFileRequest\x1a\x16.google.protobuf.Empty\"\x00\x12[\n" +
-	"\x17CancelTaildropReceiving\x12&.daemon.CancelTaildropReceivingRequest\x1a\x16.google.protobuf.Empty\"\x00\x12O\n" +
-	"\x11ProvideUSBDevices\x12\x1a.daemon.USBProviderMessage\x1a\x18.daemon.USBServerMessage\"\x00(\x010\x01\x12Y\n" +
-	"\x1aSubscribeUSBIPServerStatus\x12\x16.google.protobuf.Empty\x1a\x1f.daemon.USBIPServerStatusUpdate\"\x000\x01\x12Y\n" +
-	"\x1aSubscribeOpenConnectStatus\x12\x16.google.protobuf.Empty\x1a\x1f.daemon.OpenConnectStatusUpdate\"\x000\x01\x12d\n" +
-	"\x1dSubmitOpenConnectAuthResponse\x12).daemon.OpenConnectAuthResponseSubmission\x1a\x16.google.protobuf.Empty\"\x00\x12b\n" +
-	"\x1eCancelOpenConnectAuthChallenge\x12&.daemon.OpenConnectAuthChallengeCancel\x1a\x16.google.protobuf.Empty\"\x00\x12Q\n" +
-	"\x16SubscribeOpenVPNStatus\x12\x16.google.protobuf.Empty\x1a\x1b.daemon.OpenVPNStatusUpdate\"\x000\x01\x12^\n" +
-	"\x1eSubmitOpenVPNChallengeResponse\x12\".daemon.OpenVPNChallengeSubmission\x1a\x16.google.protobuf.Empty\"\x00\x12R\n" +
-	"\x16CancelOpenVPNChallenge\x12\x1e.daemon.OpenVPNChallengeCancel\x1a\x16.google.protobuf.Empty\"\x00\x12O\n" +
-	"\x16SubscribeNotifications\x12\x16.google.protobuf.Empty\x1a\x19.daemon.NotificationEvent\"\x000\x01B%Z#github.com/sagernet/sing-box/daemonb\x06proto3"
+	"GetVersion\x12\x16.google.protobuf.Empty\x1a\x14.sbox.daemon.Version\"\x00\x12P\n" +
+	"\x16SubscribeServiceStatus\x12\x16.google.protobuf.Empty\x1a\x1a.sbox.daemon.ServiceStatus\"\x000\x01\x12<\n" +
+	"\fSubscribeLog\x12\x16.google.protobuf.Empty\x1a\x10.sbox.daemon.Log\"\x000\x01\x12L\n" +
+	"\x12GetDefaultLogLevel\x12\x16.google.protobuf.Empty\x1a\x1c.sbox.daemon.DefaultLogLevel\"\x00\x12=\n" +
+	"\tClearLogs\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\"\x00\x12O\n" +
+	"\x0fSubscribeStatus\x12#.sbox.daemon.SubscribeStatusRequest\x1a\x13.sbox.daemon.Status\"\x000\x01\x12B\n" +
+	"\x0fSubscribeGroups\x12\x16.google.protobuf.Empty\x1a\x13.sbox.daemon.Groups\"\x000\x01\x12L\n" +
+	"\x12GetClashModeStatus\x12\x16.google.protobuf.Empty\x1a\x1c.sbox.daemon.ClashModeStatus\"\x00\x12H\n" +
+	"\x12SubscribeClashMode\x12\x16.google.protobuf.Empty\x1a\x16.sbox.daemon.ClashMode\"\x000\x01\x12@\n" +
+	"\fSetClashMode\x12\x16.sbox.daemon.ClashMode\x1a\x16.google.protobuf.Empty\"\x00\x12@\n" +
+	"\aURLTest\x12\x1b.sbox.daemon.URLTestRequest\x1a\x16.google.protobuf.Empty\"\x00\x12N\n" +
+	"\x0eSelectOutbound\x12\".sbox.daemon.SelectOutboundRequest\x1a\x16.google.protobuf.Empty\"\x00\x12N\n" +
+	"\x0eSetGroupExpand\x12\".sbox.daemon.SetGroupExpandRequest\x1a\x16.google.protobuf.Empty\"\x00\x12c\n" +
+	"\x14SubscribeConnections\x12(.sbox.daemon.SubscribeConnectionsRequest\x1a\x1d.sbox.daemon.ConnectionEvents\"\x000\x01\x12P\n" +
+	"\x0fCloseConnection\x12#.sbox.daemon.CloseConnectionRequest\x1a\x16.google.protobuf.Empty\"\x00\x12G\n" +
+	"\x13CloseAllConnections\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\"\x00\x12R\n" +
+	"\x15GetDeprecatedWarnings\x12\x16.google.protobuf.Empty\x1a\x1f.sbox.daemon.DeprecatedWarnings\"\x00\x12@\n" +
+	"\fGetStartedAt\x12\x16.google.protobuf.Empty\x1a\x16.sbox.daemon.StartedAt\"\x00\x12K\n" +
+	"\x12SubscribeOutbounds\x12\x16.google.protobuf.Empty\x1a\x19.sbox.daemon.OutboundList\"\x000\x01\x12n\n" +
+	"\x17StartNetworkQualityTest\x12&.sbox.daemon.NetworkQualityTestRequest\x1a'.sbox.daemon.NetworkQualityTestProgress\"\x000\x01\x12P\n" +
+	"\rStartSTUNTest\x12\x1c.sbox.daemon.STUNTestRequest\x1a\x1d.sbox.daemon.STUNTestProgress\"\x000\x01\x12Z\n" +
+	"\x18SubscribeTailscaleStatus\x12\x16.google.protobuf.Empty\x1a\".sbox.daemon.TailscaleStatusUpdate\"\x000\x01\x12_\n" +
+	"\x12StartTailscalePing\x12!.sbox.daemon.TailscalePingRequest\x1a\".sbox.daemon.TailscalePingResponse\"\x000\x01\x12Z\n" +
+	"\x14SetTailscaleExitNode\x12(.sbox.daemon.SetTailscaleExitNodeRequest\x1a\x16.google.protobuf.Empty\"\x00\x12P\n" +
+	"\x0fTailscaleLogout\x12#.sbox.daemon.TailscaleLogoutRequest\x1a\x16.google.protobuf.Empty\"\x00\x12h\n" +
+	"\x17GetTailscaleCertificate\x12(.sbox.daemon.TailscaleCertificateRequest\x1a!.sbox.daemon.TailscaleCertificate\"\x00\x12p\n" +
+	"\x18StartTailscaleSSHSession\x12&.sbox.daemon.TailscaleSSHClientMessage\x1a&.sbox.daemon.TailscaleSSHServerMessage\"\x00(\x010\x01\x12d\n" +
+	"\x16SubscribeTaildropInbox\x12*.sbox.daemon.SubscribeTaildropInboxRequest\x1a\x1a.sbox.daemon.TaildropInbox\"\x000\x01\x12\\\n" +
+	"\x15MarkTaildropInboxRead\x12).sbox.daemon.MarkTaildropInboxReadRequest\x1a\x16.google.protobuf.Empty\"\x00\x12i\n" +
+	"\x11SendTaildropFiles\x12&.sbox.daemon.TaildropSendClientMessage\x1a&.sbox.daemon.TaildropSendServerMessage\"\x00(\x010\x01\x12l\n" +
+	"\x14DownloadTaildropFile\x12(.sbox.daemon.DownloadTaildropFileRequest\x1a&.sbox.daemon.DownloadTaildropFileChunk\"\x000\x01\x12V\n" +
+	"\x12DeleteTaildropFile\x12&.sbox.daemon.DeleteTaildropFileRequest\x1a\x16.google.protobuf.Empty\"\x00\x12`\n" +
+	"\x17CancelTaildropReceiving\x12+.sbox.daemon.CancelTaildropReceivingRequest\x1a\x16.google.protobuf.Empty\"\x00\x12Y\n" +
+	"\x11ProvideUSBDevices\x12\x1f.sbox.daemon.USBProviderMessage\x1a\x1d.sbox.daemon.USBServerMessage\"\x00(\x010\x01\x12^\n" +
+	"\x1aSubscribeUSBIPServerStatus\x12\x16.google.protobuf.Empty\x1a$.sbox.daemon.USBIPServerStatusUpdate\"\x000\x01\x12^\n" +
+	"\x1aSubscribeOpenConnectStatus\x12\x16.google.protobuf.Empty\x1a$.sbox.daemon.OpenConnectStatusUpdate\"\x000\x01\x12i\n" +
+	"\x1dSubmitOpenConnectAuthResponse\x12..sbox.daemon.OpenConnectAuthResponseSubmission\x1a\x16.google.protobuf.Empty\"\x00\x12g\n" +
+	"\x1eCancelOpenConnectAuthChallenge\x12+.sbox.daemon.OpenConnectAuthChallengeCancel\x1a\x16.google.protobuf.Empty\"\x00\x12V\n" +
+	"\x16SubscribeOpenVPNStatus\x12\x16.google.protobuf.Empty\x1a .sbox.daemon.OpenVPNStatusUpdate\"\x000\x01\x12c\n" +
+	"\x1eSubmitOpenVPNChallengeResponse\x12'.sbox.daemon.OpenVPNChallengeSubmission\x1a\x16.google.protobuf.Empty\"\x00\x12W\n" +
+	"\x16CancelOpenVPNChallenge\x12#.sbox.daemon.OpenVPNChallengeCancel\x1a\x16.google.protobuf.Empty\"\x00\x12T\n" +
+	"\x16SubscribeNotifications\x12\x16.google.protobuf.Empty\x1a\x1e.sbox.daemon.NotificationEvent\"\x000\x01B%Z#github.com/sagernet/sing-box/daemonb\x06proto3"
 
 var (
 	file_daemon_started_service_proto_rawDescOnce sync.Once
@@ -8097,273 +8096,270 @@ func file_daemon_started_service_proto_rawDescGZIP() []byte {
 	return file_daemon_started_service_proto_rawDescData
 }
 
-var (
-	file_daemon_started_service_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-	file_daemon_started_service_proto_msgTypes  = make([]protoimpl.MessageInfo, 104)
-	file_daemon_started_service_proto_goTypes   = []any{
-		LogLevel(0),                               // 0: daemon.LogLevel
-		ConnectionEventType(0),                    // 1: daemon.ConnectionEventType
-		USBDeviceState(0),                         // 2: daemon.USBDeviceState
-		USBBackend(0),                             // 3: daemon.USBBackend
-		ServiceStatus_Type(0),                     // 4: daemon.ServiceStatus.Type
-		(*Version)(nil),                           // 5: daemon.Version
-		(*ServiceStatus)(nil),                     // 6: daemon.ServiceStatus
-		(*SubscribeStatusRequest)(nil),            // 7: daemon.SubscribeStatusRequest
-		(*Log)(nil),                               // 8: daemon.Log
-		(*DefaultLogLevel)(nil),                   // 9: daemon.DefaultLogLevel
-		(*Status)(nil),                            // 10: daemon.Status
-		(*Groups)(nil),                            // 11: daemon.Groups
-		(*Group)(nil),                             // 12: daemon.Group
-		(*GroupItem)(nil),                         // 13: daemon.GroupItem
-		(*URLTestRequest)(nil),                    // 14: daemon.URLTestRequest
-		(*SelectOutboundRequest)(nil),             // 15: daemon.SelectOutboundRequest
-		(*SetGroupExpandRequest)(nil),             // 16: daemon.SetGroupExpandRequest
-		(*ClashMode)(nil),                         // 17: daemon.ClashMode
-		(*ClashModeStatus)(nil),                   // 18: daemon.ClashModeStatus
-		(*SubscribeConnectionsRequest)(nil),       // 19: daemon.SubscribeConnectionsRequest
-		(*ConnectionEvent)(nil),                   // 20: daemon.ConnectionEvent
-		(*ConnectionEvents)(nil),                  // 21: daemon.ConnectionEvents
-		(*Connection)(nil),                        // 22: daemon.Connection
-		(*ProcessInfo)(nil),                       // 23: daemon.ProcessInfo
-		(*CloseConnectionRequest)(nil),            // 24: daemon.CloseConnectionRequest
-		(*DeprecatedWarnings)(nil),                // 25: daemon.DeprecatedWarnings
-		(*DeprecatedWarning)(nil),                 // 26: daemon.DeprecatedWarning
-		(*StartedAt)(nil),                         // 27: daemon.StartedAt
-		(*OutboundList)(nil),                      // 28: daemon.OutboundList
-		(*NetworkQualityTestRequest)(nil),         // 29: daemon.NetworkQualityTestRequest
-		(*NetworkQualityTestProgress)(nil),        // 30: daemon.NetworkQualityTestProgress
-		(*STUNTestRequest)(nil),                   // 31: daemon.STUNTestRequest
-		(*STUNTestProgress)(nil),                  // 32: daemon.STUNTestProgress
-		(*TailscaleStatusUpdate)(nil),             // 33: daemon.TailscaleStatusUpdate
-		(*TailscaleEndpointStatus)(nil),           // 34: daemon.TailscaleEndpointStatus
-		(*TailscaleUserGroup)(nil),                // 35: daemon.TailscaleUserGroup
-		(*TailscalePeer)(nil),                     // 36: daemon.TailscalePeer
-		(*TailscalePingRequest)(nil),              // 37: daemon.TailscalePingRequest
-		(*TailscalePingResponse)(nil),             // 38: daemon.TailscalePingResponse
-		(*SetTailscaleExitNodeRequest)(nil),       // 39: daemon.SetTailscaleExitNodeRequest
-		(*TailscaleLogoutRequest)(nil),            // 40: daemon.TailscaleLogoutRequest
-		(*TailscaleCertificateRequest)(nil),       // 41: daemon.TailscaleCertificateRequest
-		(*TailscaleCertificate)(nil),              // 42: daemon.TailscaleCertificate
-		(*TailscaleSSHClientMessage)(nil),         // 43: daemon.TailscaleSSHClientMessage
-		(*TailscaleSSHStart)(nil),                 // 44: daemon.TailscaleSSHStart
-		(*TailscaleSSHInput)(nil),                 // 45: daemon.TailscaleSSHInput
-		(*TailscaleSSHResize)(nil),                // 46: daemon.TailscaleSSHResize
-		(*TailscaleSSHServerMessage)(nil),         // 47: daemon.TailscaleSSHServerMessage
-		(*TailscaleSSHAuthBanner)(nil),            // 48: daemon.TailscaleSSHAuthBanner
-		(*TailscaleSSHReady)(nil),                 // 49: daemon.TailscaleSSHReady
-		(*TailscaleSSHOutput)(nil),                // 50: daemon.TailscaleSSHOutput
-		(*TailscaleSSHExit)(nil),                  // 51: daemon.TailscaleSSHExit
-		(*TailscaleSSHError)(nil),                 // 52: daemon.TailscaleSSHError
-		(*SubscribeTaildropInboxRequest)(nil),     // 53: daemon.SubscribeTaildropInboxRequest
-		(*MarkTaildropInboxReadRequest)(nil),      // 54: daemon.MarkTaildropInboxReadRequest
-		(*TaildropInbox)(nil),                     // 55: daemon.TaildropInbox
-		(*TaildropFile)(nil),                      // 56: daemon.TaildropFile
-		(*TaildropReceivingFile)(nil),             // 57: daemon.TaildropReceivingFile
-		(*TaildropSendClientMessage)(nil),         // 58: daemon.TaildropSendClientMessage
-		(*TaildropSendStart)(nil),                 // 59: daemon.TaildropSendStart
-		(*TaildropOutgoingFile)(nil),              // 60: daemon.TaildropOutgoingFile
-		(*TaildropFileChunk)(nil),                 // 61: daemon.TaildropFileChunk
-		(*TaildropFileDone)(nil),                  // 62: daemon.TaildropFileDone
-		(*TaildropSendServerMessage)(nil),         // 63: daemon.TaildropSendServerMessage
-		(*TaildropSendProgress)(nil),              // 64: daemon.TaildropSendProgress
-		(*DownloadTaildropFileRequest)(nil),       // 65: daemon.DownloadTaildropFileRequest
-		(*DownloadTaildropFileChunk)(nil),         // 66: daemon.DownloadTaildropFileChunk
-		(*DeleteTaildropFileRequest)(nil),         // 67: daemon.DeleteTaildropFileRequest
-		(*CancelTaildropReceivingRequest)(nil),    // 68: daemon.CancelTaildropReceivingRequest
-		(*USBProviderMessage)(nil),                // 69: daemon.USBProviderMessage
-		(*USBServerMessage)(nil),                  // 70: daemon.USBServerMessage
-		(*USBDeviceDescriptor)(nil),               // 71: daemon.USBDeviceDescriptor
-		(*USBDeviceAttach)(nil),                   // 72: daemon.USBDeviceAttach
-		(*USBInterface)(nil),                      // 73: daemon.USBInterface
-		(*USBDeviceDetach)(nil),                   // 74: daemon.USBDeviceDetach
-		(*USBDeviceReady)(nil),                    // 75: daemon.USBDeviceReady
-		(*USBURBRequest)(nil),                     // 76: daemon.USBURBRequest
-		(*USBURBResponse)(nil),                    // 77: daemon.USBURBResponse
-		(*USBIsoPacket)(nil),                      // 78: daemon.USBIsoPacket
-		(*USBEndpointAbort)(nil),                  // 79: daemon.USBEndpointAbort
-		(*USBError)(nil),                          // 80: daemon.USBError
-		(*USBIPServerStatusUpdate)(nil),           // 81: daemon.USBIPServerStatusUpdate
-		(*USBIPServerStatus)(nil),                 // 82: daemon.USBIPServerStatus
-		(*USBSharedDevice)(nil),                   // 83: daemon.USBSharedDevice
-		(*OpenConnectStatusUpdate)(nil),           // 84: daemon.OpenConnectStatusUpdate
-		(*OpenConnectEndpointStatus)(nil),         // 85: daemon.OpenConnectEndpointStatus
-		(*OpenConnectTunnelInfo)(nil),             // 86: daemon.OpenConnectTunnelInfo
-		(*OpenConnectAuthChallenge)(nil),          // 87: daemon.OpenConnectAuthChallenge
-		(*OpenConnectAuthForm)(nil),               // 88: daemon.OpenConnectAuthForm
-		(*OpenConnectAuthFormField)(nil),          // 89: daemon.OpenConnectAuthFormField
-		(*OpenConnectAuthFormChoice)(nil),         // 90: daemon.OpenConnectAuthFormChoice
-		(*OpenConnectBrowserRequest)(nil),         // 91: daemon.OpenConnectBrowserRequest
-		(*OpenConnectBrowserCookie)(nil),          // 92: daemon.OpenConnectBrowserCookie
-		(*OpenConnectBrowserHeader)(nil),          // 93: daemon.OpenConnectBrowserHeader
-		(*OpenConnectAuthFormResponse)(nil),       // 94: daemon.OpenConnectAuthFormResponse
-		(*OpenConnectBrowserResult)(nil),          // 95: daemon.OpenConnectBrowserResult
-		(*OpenConnectAuthResponseSubmission)(nil), // 96: daemon.OpenConnectAuthResponseSubmission
-		(*OpenConnectAuthChallengeCancel)(nil),    // 97: daemon.OpenConnectAuthChallengeCancel
-		(*OpenVPNStatusUpdate)(nil),               // 98: daemon.OpenVPNStatusUpdate
-		(*OpenVPNEndpointStatus)(nil),             // 99: daemon.OpenVPNEndpointStatus
-		(*OpenVPNTunnelInfo)(nil),                 // 100: daemon.OpenVPNTunnelInfo
-		(*OpenVPNChallenge)(nil),                  // 101: daemon.OpenVPNChallenge
-		(*OpenVPNChallengeSubmission)(nil),        // 102: daemon.OpenVPNChallengeSubmission
-		(*OpenVPNChallengeCancel)(nil),            // 103: daemon.OpenVPNChallengeCancel
-		(*NotificationEvent)(nil),                 // 104: daemon.NotificationEvent
-		(*Notification)(nil),                      // 105: daemon.Notification
-		(*NotificationCancel)(nil),                // 106: daemon.NotificationCancel
-		(*Log_Message)(nil),                       // 107: daemon.Log.Message
-		nil,                                       // 108: daemon.OpenConnectAuthFormResponse.ValuesEntry
-		(*emptypb.Empty)(nil),                     // 109: google.protobuf.Empty
-	}
-)
-
+var file_daemon_started_service_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_daemon_started_service_proto_msgTypes = make([]protoimpl.MessageInfo, 104)
+var file_daemon_started_service_proto_goTypes = []any{
+	(LogLevel)(0),                             // 0: sbox.daemon.LogLevel
+	(ConnectionEventType)(0),                  // 1: sbox.daemon.ConnectionEventType
+	(USBDeviceState)(0),                       // 2: sbox.daemon.USBDeviceState
+	(USBBackend)(0),                           // 3: sbox.daemon.USBBackend
+	(ServiceStatus_Type)(0),                   // 4: sbox.daemon.ServiceStatus.Type
+	(*Version)(nil),                           // 5: sbox.daemon.Version
+	(*ServiceStatus)(nil),                     // 6: sbox.daemon.ServiceStatus
+	(*SubscribeStatusRequest)(nil),            // 7: sbox.daemon.SubscribeStatusRequest
+	(*Log)(nil),                               // 8: sbox.daemon.Log
+	(*DefaultLogLevel)(nil),                   // 9: sbox.daemon.DefaultLogLevel
+	(*Status)(nil),                            // 10: sbox.daemon.Status
+	(*Groups)(nil),                            // 11: sbox.daemon.Groups
+	(*Group)(nil),                             // 12: sbox.daemon.Group
+	(*GroupItem)(nil),                         // 13: sbox.daemon.GroupItem
+	(*URLTestRequest)(nil),                    // 14: sbox.daemon.URLTestRequest
+	(*SelectOutboundRequest)(nil),             // 15: sbox.daemon.SelectOutboundRequest
+	(*SetGroupExpandRequest)(nil),             // 16: sbox.daemon.SetGroupExpandRequest
+	(*ClashMode)(nil),                         // 17: sbox.daemon.ClashMode
+	(*ClashModeStatus)(nil),                   // 18: sbox.daemon.ClashModeStatus
+	(*SubscribeConnectionsRequest)(nil),       // 19: sbox.daemon.SubscribeConnectionsRequest
+	(*ConnectionEvent)(nil),                   // 20: sbox.daemon.ConnectionEvent
+	(*ConnectionEvents)(nil),                  // 21: sbox.daemon.ConnectionEvents
+	(*Connection)(nil),                        // 22: sbox.daemon.Connection
+	(*ProcessInfo)(nil),                       // 23: sbox.daemon.ProcessInfo
+	(*CloseConnectionRequest)(nil),            // 24: sbox.daemon.CloseConnectionRequest
+	(*DeprecatedWarnings)(nil),                // 25: sbox.daemon.DeprecatedWarnings
+	(*DeprecatedWarning)(nil),                 // 26: sbox.daemon.DeprecatedWarning
+	(*StartedAt)(nil),                         // 27: sbox.daemon.StartedAt
+	(*OutboundList)(nil),                      // 28: sbox.daemon.OutboundList
+	(*NetworkQualityTestRequest)(nil),         // 29: sbox.daemon.NetworkQualityTestRequest
+	(*NetworkQualityTestProgress)(nil),        // 30: sbox.daemon.NetworkQualityTestProgress
+	(*STUNTestRequest)(nil),                   // 31: sbox.daemon.STUNTestRequest
+	(*STUNTestProgress)(nil),                  // 32: sbox.daemon.STUNTestProgress
+	(*TailscaleStatusUpdate)(nil),             // 33: sbox.daemon.TailscaleStatusUpdate
+	(*TailscaleEndpointStatus)(nil),           // 34: sbox.daemon.TailscaleEndpointStatus
+	(*TailscaleUserGroup)(nil),                // 35: sbox.daemon.TailscaleUserGroup
+	(*TailscalePeer)(nil),                     // 36: sbox.daemon.TailscalePeer
+	(*TailscalePingRequest)(nil),              // 37: sbox.daemon.TailscalePingRequest
+	(*TailscalePingResponse)(nil),             // 38: sbox.daemon.TailscalePingResponse
+	(*SetTailscaleExitNodeRequest)(nil),       // 39: sbox.daemon.SetTailscaleExitNodeRequest
+	(*TailscaleLogoutRequest)(nil),            // 40: sbox.daemon.TailscaleLogoutRequest
+	(*TailscaleCertificateRequest)(nil),       // 41: sbox.daemon.TailscaleCertificateRequest
+	(*TailscaleCertificate)(nil),              // 42: sbox.daemon.TailscaleCertificate
+	(*TailscaleSSHClientMessage)(nil),         // 43: sbox.daemon.TailscaleSSHClientMessage
+	(*TailscaleSSHStart)(nil),                 // 44: sbox.daemon.TailscaleSSHStart
+	(*TailscaleSSHInput)(nil),                 // 45: sbox.daemon.TailscaleSSHInput
+	(*TailscaleSSHResize)(nil),                // 46: sbox.daemon.TailscaleSSHResize
+	(*TailscaleSSHServerMessage)(nil),         // 47: sbox.daemon.TailscaleSSHServerMessage
+	(*TailscaleSSHAuthBanner)(nil),            // 48: sbox.daemon.TailscaleSSHAuthBanner
+	(*TailscaleSSHReady)(nil),                 // 49: sbox.daemon.TailscaleSSHReady
+	(*TailscaleSSHOutput)(nil),                // 50: sbox.daemon.TailscaleSSHOutput
+	(*TailscaleSSHExit)(nil),                  // 51: sbox.daemon.TailscaleSSHExit
+	(*TailscaleSSHError)(nil),                 // 52: sbox.daemon.TailscaleSSHError
+	(*SubscribeTaildropInboxRequest)(nil),     // 53: sbox.daemon.SubscribeTaildropInboxRequest
+	(*MarkTaildropInboxReadRequest)(nil),      // 54: sbox.daemon.MarkTaildropInboxReadRequest
+	(*TaildropInbox)(nil),                     // 55: sbox.daemon.TaildropInbox
+	(*TaildropFile)(nil),                      // 56: sbox.daemon.TaildropFile
+	(*TaildropReceivingFile)(nil),             // 57: sbox.daemon.TaildropReceivingFile
+	(*TaildropSendClientMessage)(nil),         // 58: sbox.daemon.TaildropSendClientMessage
+	(*TaildropSendStart)(nil),                 // 59: sbox.daemon.TaildropSendStart
+	(*TaildropOutgoingFile)(nil),              // 60: sbox.daemon.TaildropOutgoingFile
+	(*TaildropFileChunk)(nil),                 // 61: sbox.daemon.TaildropFileChunk
+	(*TaildropFileDone)(nil),                  // 62: sbox.daemon.TaildropFileDone
+	(*TaildropSendServerMessage)(nil),         // 63: sbox.daemon.TaildropSendServerMessage
+	(*TaildropSendProgress)(nil),              // 64: sbox.daemon.TaildropSendProgress
+	(*DownloadTaildropFileRequest)(nil),       // 65: sbox.daemon.DownloadTaildropFileRequest
+	(*DownloadTaildropFileChunk)(nil),         // 66: sbox.daemon.DownloadTaildropFileChunk
+	(*DeleteTaildropFileRequest)(nil),         // 67: sbox.daemon.DeleteTaildropFileRequest
+	(*CancelTaildropReceivingRequest)(nil),    // 68: sbox.daemon.CancelTaildropReceivingRequest
+	(*USBProviderMessage)(nil),                // 69: sbox.daemon.USBProviderMessage
+	(*USBServerMessage)(nil),                  // 70: sbox.daemon.USBServerMessage
+	(*USBDeviceDescriptor)(nil),               // 71: sbox.daemon.USBDeviceDescriptor
+	(*USBDeviceAttach)(nil),                   // 72: sbox.daemon.USBDeviceAttach
+	(*USBInterface)(nil),                      // 73: sbox.daemon.USBInterface
+	(*USBDeviceDetach)(nil),                   // 74: sbox.daemon.USBDeviceDetach
+	(*USBDeviceReady)(nil),                    // 75: sbox.daemon.USBDeviceReady
+	(*USBURBRequest)(nil),                     // 76: sbox.daemon.USBURBRequest
+	(*USBURBResponse)(nil),                    // 77: sbox.daemon.USBURBResponse
+	(*USBIsoPacket)(nil),                      // 78: sbox.daemon.USBIsoPacket
+	(*USBEndpointAbort)(nil),                  // 79: sbox.daemon.USBEndpointAbort
+	(*USBError)(nil),                          // 80: sbox.daemon.USBError
+	(*USBIPServerStatusUpdate)(nil),           // 81: sbox.daemon.USBIPServerStatusUpdate
+	(*USBIPServerStatus)(nil),                 // 82: sbox.daemon.USBIPServerStatus
+	(*USBSharedDevice)(nil),                   // 83: sbox.daemon.USBSharedDevice
+	(*OpenConnectStatusUpdate)(nil),           // 84: sbox.daemon.OpenConnectStatusUpdate
+	(*OpenConnectEndpointStatus)(nil),         // 85: sbox.daemon.OpenConnectEndpointStatus
+	(*OpenConnectTunnelInfo)(nil),             // 86: sbox.daemon.OpenConnectTunnelInfo
+	(*OpenConnectAuthChallenge)(nil),          // 87: sbox.daemon.OpenConnectAuthChallenge
+	(*OpenConnectAuthForm)(nil),               // 88: sbox.daemon.OpenConnectAuthForm
+	(*OpenConnectAuthFormField)(nil),          // 89: sbox.daemon.OpenConnectAuthFormField
+	(*OpenConnectAuthFormChoice)(nil),         // 90: sbox.daemon.OpenConnectAuthFormChoice
+	(*OpenConnectBrowserRequest)(nil),         // 91: sbox.daemon.OpenConnectBrowserRequest
+	(*OpenConnectBrowserCookie)(nil),          // 92: sbox.daemon.OpenConnectBrowserCookie
+	(*OpenConnectBrowserHeader)(nil),          // 93: sbox.daemon.OpenConnectBrowserHeader
+	(*OpenConnectAuthFormResponse)(nil),       // 94: sbox.daemon.OpenConnectAuthFormResponse
+	(*OpenConnectBrowserResult)(nil),          // 95: sbox.daemon.OpenConnectBrowserResult
+	(*OpenConnectAuthResponseSubmission)(nil), // 96: sbox.daemon.OpenConnectAuthResponseSubmission
+	(*OpenConnectAuthChallengeCancel)(nil),    // 97: sbox.daemon.OpenConnectAuthChallengeCancel
+	(*OpenVPNStatusUpdate)(nil),               // 98: sbox.daemon.OpenVPNStatusUpdate
+	(*OpenVPNEndpointStatus)(nil),             // 99: sbox.daemon.OpenVPNEndpointStatus
+	(*OpenVPNTunnelInfo)(nil),                 // 100: sbox.daemon.OpenVPNTunnelInfo
+	(*OpenVPNChallenge)(nil),                  // 101: sbox.daemon.OpenVPNChallenge
+	(*OpenVPNChallengeSubmission)(nil),        // 102: sbox.daemon.OpenVPNChallengeSubmission
+	(*OpenVPNChallengeCancel)(nil),            // 103: sbox.daemon.OpenVPNChallengeCancel
+	(*NotificationEvent)(nil),                 // 104: sbox.daemon.NotificationEvent
+	(*Notification)(nil),                      // 105: sbox.daemon.Notification
+	(*NotificationCancel)(nil),                // 106: sbox.daemon.NotificationCancel
+	(*Log_Message)(nil),                       // 107: sbox.daemon.Log.Message
+	nil,                                       // 108: sbox.daemon.OpenConnectAuthFormResponse.ValuesEntry
+	(*emptypb.Empty)(nil),                     // 109: google.protobuf.Empty
+}
 var file_daemon_started_service_proto_depIdxs = []int32{
-	4,   // 0: daemon.ServiceStatus.status:type_name -> daemon.ServiceStatus.Type
-	107, // 1: daemon.Log.messages:type_name -> daemon.Log.Message
-	0,   // 2: daemon.DefaultLogLevel.level:type_name -> daemon.LogLevel
-	12,  // 3: daemon.Groups.group:type_name -> daemon.Group
-	13,  // 4: daemon.Group.items:type_name -> daemon.GroupItem
-	1,   // 5: daemon.ConnectionEvent.type:type_name -> daemon.ConnectionEventType
-	22,  // 6: daemon.ConnectionEvent.connection:type_name -> daemon.Connection
-	20,  // 7: daemon.ConnectionEvents.events:type_name -> daemon.ConnectionEvent
-	23,  // 8: daemon.Connection.processInfo:type_name -> daemon.ProcessInfo
-	26,  // 9: daemon.DeprecatedWarnings.warnings:type_name -> daemon.DeprecatedWarning
-	13,  // 10: daemon.OutboundList.outbounds:type_name -> daemon.GroupItem
-	34,  // 11: daemon.TailscaleStatusUpdate.endpoints:type_name -> daemon.TailscaleEndpointStatus
-	36,  // 12: daemon.TailscaleEndpointStatus.self:type_name -> daemon.TailscalePeer
-	35,  // 13: daemon.TailscaleEndpointStatus.userGroups:type_name -> daemon.TailscaleUserGroup
-	36,  // 14: daemon.TailscaleEndpointStatus.exitNode:type_name -> daemon.TailscalePeer
-	36,  // 15: daemon.TailscaleUserGroup.peers:type_name -> daemon.TailscalePeer
-	44,  // 16: daemon.TailscaleSSHClientMessage.start:type_name -> daemon.TailscaleSSHStart
-	45,  // 17: daemon.TailscaleSSHClientMessage.input:type_name -> daemon.TailscaleSSHInput
-	46,  // 18: daemon.TailscaleSSHClientMessage.resize:type_name -> daemon.TailscaleSSHResize
-	48,  // 19: daemon.TailscaleSSHServerMessage.authBanner:type_name -> daemon.TailscaleSSHAuthBanner
-	49,  // 20: daemon.TailscaleSSHServerMessage.ready:type_name -> daemon.TailscaleSSHReady
-	50,  // 21: daemon.TailscaleSSHServerMessage.output:type_name -> daemon.TailscaleSSHOutput
-	51,  // 22: daemon.TailscaleSSHServerMessage.exit:type_name -> daemon.TailscaleSSHExit
-	52,  // 23: daemon.TailscaleSSHServerMessage.error:type_name -> daemon.TailscaleSSHError
-	56,  // 24: daemon.TaildropInbox.files:type_name -> daemon.TaildropFile
-	57,  // 25: daemon.TaildropInbox.receiving:type_name -> daemon.TaildropReceivingFile
-	59,  // 26: daemon.TaildropSendClientMessage.start:type_name -> daemon.TaildropSendStart
-	61,  // 27: daemon.TaildropSendClientMessage.chunk:type_name -> daemon.TaildropFileChunk
-	62,  // 28: daemon.TaildropSendClientMessage.fileDone:type_name -> daemon.TaildropFileDone
-	60,  // 29: daemon.TaildropSendStart.files:type_name -> daemon.TaildropOutgoingFile
-	64,  // 30: daemon.TaildropSendServerMessage.progress:type_name -> daemon.TaildropSendProgress
-	72,  // 31: daemon.USBProviderMessage.attach:type_name -> daemon.USBDeviceAttach
-	74,  // 32: daemon.USBProviderMessage.detach:type_name -> daemon.USBDeviceDetach
-	77,  // 33: daemon.USBProviderMessage.urbResponse:type_name -> daemon.USBURBResponse
-	75,  // 34: daemon.USBServerMessage.ready:type_name -> daemon.USBDeviceReady
-	76,  // 35: daemon.USBServerMessage.urbRequest:type_name -> daemon.USBURBRequest
-	79,  // 36: daemon.USBServerMessage.abort:type_name -> daemon.USBEndpointAbort
-	80,  // 37: daemon.USBServerMessage.error:type_name -> daemon.USBError
-	73,  // 38: daemon.USBDeviceDescriptor.interfaces:type_name -> daemon.USBInterface
-	71,  // 39: daemon.USBDeviceAttach.descriptor:type_name -> daemon.USBDeviceDescriptor
-	78,  // 40: daemon.USBURBRequest.isoPackets:type_name -> daemon.USBIsoPacket
-	78,  // 41: daemon.USBURBResponse.isoPackets:type_name -> daemon.USBIsoPacket
-	82,  // 42: daemon.USBIPServerStatusUpdate.servers:type_name -> daemon.USBIPServerStatus
-	83,  // 43: daemon.USBIPServerStatus.devices:type_name -> daemon.USBSharedDevice
-	71,  // 44: daemon.USBSharedDevice.descriptor:type_name -> daemon.USBDeviceDescriptor
-	3,   // 45: daemon.USBSharedDevice.backend:type_name -> daemon.USBBackend
-	2,   // 46: daemon.USBSharedDevice.state:type_name -> daemon.USBDeviceState
-	85,  // 47: daemon.OpenConnectStatusUpdate.endpoints:type_name -> daemon.OpenConnectEndpointStatus
-	87,  // 48: daemon.OpenConnectEndpointStatus.authChallenge:type_name -> daemon.OpenConnectAuthChallenge
-	86,  // 49: daemon.OpenConnectEndpointStatus.tunnelInfo:type_name -> daemon.OpenConnectTunnelInfo
-	88,  // 50: daemon.OpenConnectAuthChallenge.form:type_name -> daemon.OpenConnectAuthForm
-	91,  // 51: daemon.OpenConnectAuthChallenge.browser:type_name -> daemon.OpenConnectBrowserRequest
-	89,  // 52: daemon.OpenConnectAuthForm.fields:type_name -> daemon.OpenConnectAuthFormField
-	90,  // 53: daemon.OpenConnectAuthFormField.options:type_name -> daemon.OpenConnectAuthFormChoice
-	108, // 54: daemon.OpenConnectAuthFormResponse.values:type_name -> daemon.OpenConnectAuthFormResponse.ValuesEntry
-	92,  // 55: daemon.OpenConnectBrowserResult.cookies:type_name -> daemon.OpenConnectBrowserCookie
-	93,  // 56: daemon.OpenConnectBrowserResult.headers:type_name -> daemon.OpenConnectBrowserHeader
-	94,  // 57: daemon.OpenConnectAuthResponseSubmission.form:type_name -> daemon.OpenConnectAuthFormResponse
-	95,  // 58: daemon.OpenConnectAuthResponseSubmission.browser:type_name -> daemon.OpenConnectBrowserResult
-	99,  // 59: daemon.OpenVPNStatusUpdate.endpoints:type_name -> daemon.OpenVPNEndpointStatus
-	101, // 60: daemon.OpenVPNEndpointStatus.challenge:type_name -> daemon.OpenVPNChallenge
-	100, // 61: daemon.OpenVPNEndpointStatus.tunnelInfo:type_name -> daemon.OpenVPNTunnelInfo
-	105, // 62: daemon.NotificationEvent.send:type_name -> daemon.Notification
-	106, // 63: daemon.NotificationEvent.cancel:type_name -> daemon.NotificationCancel
-	0,   // 64: daemon.Log.Message.level:type_name -> daemon.LogLevel
-	109, // 65: daemon.StartedService.GetVersion:input_type -> google.protobuf.Empty
-	109, // 66: daemon.StartedService.SubscribeServiceStatus:input_type -> google.protobuf.Empty
-	109, // 67: daemon.StartedService.SubscribeLog:input_type -> google.protobuf.Empty
-	109, // 68: daemon.StartedService.GetDefaultLogLevel:input_type -> google.protobuf.Empty
-	109, // 69: daemon.StartedService.ClearLogs:input_type -> google.protobuf.Empty
-	7,   // 70: daemon.StartedService.SubscribeStatus:input_type -> daemon.SubscribeStatusRequest
-	109, // 71: daemon.StartedService.SubscribeGroups:input_type -> google.protobuf.Empty
-	109, // 72: daemon.StartedService.GetClashModeStatus:input_type -> google.protobuf.Empty
-	109, // 73: daemon.StartedService.SubscribeClashMode:input_type -> google.protobuf.Empty
-	17,  // 74: daemon.StartedService.SetClashMode:input_type -> daemon.ClashMode
-	14,  // 75: daemon.StartedService.URLTest:input_type -> daemon.URLTestRequest
-	15,  // 76: daemon.StartedService.SelectOutbound:input_type -> daemon.SelectOutboundRequest
-	16,  // 77: daemon.StartedService.SetGroupExpand:input_type -> daemon.SetGroupExpandRequest
-	19,  // 78: daemon.StartedService.SubscribeConnections:input_type -> daemon.SubscribeConnectionsRequest
-	24,  // 79: daemon.StartedService.CloseConnection:input_type -> daemon.CloseConnectionRequest
-	109, // 80: daemon.StartedService.CloseAllConnections:input_type -> google.protobuf.Empty
-	109, // 81: daemon.StartedService.GetDeprecatedWarnings:input_type -> google.protobuf.Empty
-	109, // 82: daemon.StartedService.GetStartedAt:input_type -> google.protobuf.Empty
-	109, // 83: daemon.StartedService.SubscribeOutbounds:input_type -> google.protobuf.Empty
-	29,  // 84: daemon.StartedService.StartNetworkQualityTest:input_type -> daemon.NetworkQualityTestRequest
-	31,  // 85: daemon.StartedService.StartSTUNTest:input_type -> daemon.STUNTestRequest
-	109, // 86: daemon.StartedService.SubscribeTailscaleStatus:input_type -> google.protobuf.Empty
-	37,  // 87: daemon.StartedService.StartTailscalePing:input_type -> daemon.TailscalePingRequest
-	39,  // 88: daemon.StartedService.SetTailscaleExitNode:input_type -> daemon.SetTailscaleExitNodeRequest
-	40,  // 89: daemon.StartedService.TailscaleLogout:input_type -> daemon.TailscaleLogoutRequest
-	41,  // 90: daemon.StartedService.GetTailscaleCertificate:input_type -> daemon.TailscaleCertificateRequest
-	43,  // 91: daemon.StartedService.StartTailscaleSSHSession:input_type -> daemon.TailscaleSSHClientMessage
-	53,  // 92: daemon.StartedService.SubscribeTaildropInbox:input_type -> daemon.SubscribeTaildropInboxRequest
-	54,  // 93: daemon.StartedService.MarkTaildropInboxRead:input_type -> daemon.MarkTaildropInboxReadRequest
-	58,  // 94: daemon.StartedService.SendTaildropFiles:input_type -> daemon.TaildropSendClientMessage
-	65,  // 95: daemon.StartedService.DownloadTaildropFile:input_type -> daemon.DownloadTaildropFileRequest
-	67,  // 96: daemon.StartedService.DeleteTaildropFile:input_type -> daemon.DeleteTaildropFileRequest
-	68,  // 97: daemon.StartedService.CancelTaildropReceiving:input_type -> daemon.CancelTaildropReceivingRequest
-	69,  // 98: daemon.StartedService.ProvideUSBDevices:input_type -> daemon.USBProviderMessage
-	109, // 99: daemon.StartedService.SubscribeUSBIPServerStatus:input_type -> google.protobuf.Empty
-	109, // 100: daemon.StartedService.SubscribeOpenConnectStatus:input_type -> google.protobuf.Empty
-	96,  // 101: daemon.StartedService.SubmitOpenConnectAuthResponse:input_type -> daemon.OpenConnectAuthResponseSubmission
-	97,  // 102: daemon.StartedService.CancelOpenConnectAuthChallenge:input_type -> daemon.OpenConnectAuthChallengeCancel
-	109, // 103: daemon.StartedService.SubscribeOpenVPNStatus:input_type -> google.protobuf.Empty
-	102, // 104: daemon.StartedService.SubmitOpenVPNChallengeResponse:input_type -> daemon.OpenVPNChallengeSubmission
-	103, // 105: daemon.StartedService.CancelOpenVPNChallenge:input_type -> daemon.OpenVPNChallengeCancel
-	109, // 106: daemon.StartedService.SubscribeNotifications:input_type -> google.protobuf.Empty
-	5,   // 107: daemon.StartedService.GetVersion:output_type -> daemon.Version
-	6,   // 108: daemon.StartedService.SubscribeServiceStatus:output_type -> daemon.ServiceStatus
-	8,   // 109: daemon.StartedService.SubscribeLog:output_type -> daemon.Log
-	9,   // 110: daemon.StartedService.GetDefaultLogLevel:output_type -> daemon.DefaultLogLevel
-	109, // 111: daemon.StartedService.ClearLogs:output_type -> google.protobuf.Empty
-	10,  // 112: daemon.StartedService.SubscribeStatus:output_type -> daemon.Status
-	11,  // 113: daemon.StartedService.SubscribeGroups:output_type -> daemon.Groups
-	18,  // 114: daemon.StartedService.GetClashModeStatus:output_type -> daemon.ClashModeStatus
-	17,  // 115: daemon.StartedService.SubscribeClashMode:output_type -> daemon.ClashMode
-	109, // 116: daemon.StartedService.SetClashMode:output_type -> google.protobuf.Empty
-	109, // 117: daemon.StartedService.URLTest:output_type -> google.protobuf.Empty
-	109, // 118: daemon.StartedService.SelectOutbound:output_type -> google.protobuf.Empty
-	109, // 119: daemon.StartedService.SetGroupExpand:output_type -> google.protobuf.Empty
-	21,  // 120: daemon.StartedService.SubscribeConnections:output_type -> daemon.ConnectionEvents
-	109, // 121: daemon.StartedService.CloseConnection:output_type -> google.protobuf.Empty
-	109, // 122: daemon.StartedService.CloseAllConnections:output_type -> google.protobuf.Empty
-	25,  // 123: daemon.StartedService.GetDeprecatedWarnings:output_type -> daemon.DeprecatedWarnings
-	27,  // 124: daemon.StartedService.GetStartedAt:output_type -> daemon.StartedAt
-	28,  // 125: daemon.StartedService.SubscribeOutbounds:output_type -> daemon.OutboundList
-	30,  // 126: daemon.StartedService.StartNetworkQualityTest:output_type -> daemon.NetworkQualityTestProgress
-	32,  // 127: daemon.StartedService.StartSTUNTest:output_type -> daemon.STUNTestProgress
-	33,  // 128: daemon.StartedService.SubscribeTailscaleStatus:output_type -> daemon.TailscaleStatusUpdate
-	38,  // 129: daemon.StartedService.StartTailscalePing:output_type -> daemon.TailscalePingResponse
-	109, // 130: daemon.StartedService.SetTailscaleExitNode:output_type -> google.protobuf.Empty
-	109, // 131: daemon.StartedService.TailscaleLogout:output_type -> google.protobuf.Empty
-	42,  // 132: daemon.StartedService.GetTailscaleCertificate:output_type -> daemon.TailscaleCertificate
-	47,  // 133: daemon.StartedService.StartTailscaleSSHSession:output_type -> daemon.TailscaleSSHServerMessage
-	55,  // 134: daemon.StartedService.SubscribeTaildropInbox:output_type -> daemon.TaildropInbox
-	109, // 135: daemon.StartedService.MarkTaildropInboxRead:output_type -> google.protobuf.Empty
-	63,  // 136: daemon.StartedService.SendTaildropFiles:output_type -> daemon.TaildropSendServerMessage
-	66,  // 137: daemon.StartedService.DownloadTaildropFile:output_type -> daemon.DownloadTaildropFileChunk
-	109, // 138: daemon.StartedService.DeleteTaildropFile:output_type -> google.protobuf.Empty
-	109, // 139: daemon.StartedService.CancelTaildropReceiving:output_type -> google.protobuf.Empty
-	70,  // 140: daemon.StartedService.ProvideUSBDevices:output_type -> daemon.USBServerMessage
-	81,  // 141: daemon.StartedService.SubscribeUSBIPServerStatus:output_type -> daemon.USBIPServerStatusUpdate
-	84,  // 142: daemon.StartedService.SubscribeOpenConnectStatus:output_type -> daemon.OpenConnectStatusUpdate
-	109, // 143: daemon.StartedService.SubmitOpenConnectAuthResponse:output_type -> google.protobuf.Empty
-	109, // 144: daemon.StartedService.CancelOpenConnectAuthChallenge:output_type -> google.protobuf.Empty
-	98,  // 145: daemon.StartedService.SubscribeOpenVPNStatus:output_type -> daemon.OpenVPNStatusUpdate
-	109, // 146: daemon.StartedService.SubmitOpenVPNChallengeResponse:output_type -> google.protobuf.Empty
-	109, // 147: daemon.StartedService.CancelOpenVPNChallenge:output_type -> google.protobuf.Empty
-	104, // 148: daemon.StartedService.SubscribeNotifications:output_type -> daemon.NotificationEvent
+	4,   // 0: sbox.daemon.ServiceStatus.status:type_name -> sbox.daemon.ServiceStatus.Type
+	107, // 1: sbox.daemon.Log.messages:type_name -> sbox.daemon.Log.Message
+	0,   // 2: sbox.daemon.DefaultLogLevel.level:type_name -> sbox.daemon.LogLevel
+	12,  // 3: sbox.daemon.Groups.group:type_name -> sbox.daemon.Group
+	13,  // 4: sbox.daemon.Group.items:type_name -> sbox.daemon.GroupItem
+	1,   // 5: sbox.daemon.ConnectionEvent.type:type_name -> sbox.daemon.ConnectionEventType
+	22,  // 6: sbox.daemon.ConnectionEvent.connection:type_name -> sbox.daemon.Connection
+	20,  // 7: sbox.daemon.ConnectionEvents.events:type_name -> sbox.daemon.ConnectionEvent
+	23,  // 8: sbox.daemon.Connection.processInfo:type_name -> sbox.daemon.ProcessInfo
+	26,  // 9: sbox.daemon.DeprecatedWarnings.warnings:type_name -> sbox.daemon.DeprecatedWarning
+	13,  // 10: sbox.daemon.OutboundList.outbounds:type_name -> sbox.daemon.GroupItem
+	34,  // 11: sbox.daemon.TailscaleStatusUpdate.endpoints:type_name -> sbox.daemon.TailscaleEndpointStatus
+	36,  // 12: sbox.daemon.TailscaleEndpointStatus.self:type_name -> sbox.daemon.TailscalePeer
+	35,  // 13: sbox.daemon.TailscaleEndpointStatus.userGroups:type_name -> sbox.daemon.TailscaleUserGroup
+	36,  // 14: sbox.daemon.TailscaleEndpointStatus.exitNode:type_name -> sbox.daemon.TailscalePeer
+	36,  // 15: sbox.daemon.TailscaleUserGroup.peers:type_name -> sbox.daemon.TailscalePeer
+	44,  // 16: sbox.daemon.TailscaleSSHClientMessage.start:type_name -> sbox.daemon.TailscaleSSHStart
+	45,  // 17: sbox.daemon.TailscaleSSHClientMessage.input:type_name -> sbox.daemon.TailscaleSSHInput
+	46,  // 18: sbox.daemon.TailscaleSSHClientMessage.resize:type_name -> sbox.daemon.TailscaleSSHResize
+	48,  // 19: sbox.daemon.TailscaleSSHServerMessage.authBanner:type_name -> sbox.daemon.TailscaleSSHAuthBanner
+	49,  // 20: sbox.daemon.TailscaleSSHServerMessage.ready:type_name -> sbox.daemon.TailscaleSSHReady
+	50,  // 21: sbox.daemon.TailscaleSSHServerMessage.output:type_name -> sbox.daemon.TailscaleSSHOutput
+	51,  // 22: sbox.daemon.TailscaleSSHServerMessage.exit:type_name -> sbox.daemon.TailscaleSSHExit
+	52,  // 23: sbox.daemon.TailscaleSSHServerMessage.error:type_name -> sbox.daemon.TailscaleSSHError
+	56,  // 24: sbox.daemon.TaildropInbox.files:type_name -> sbox.daemon.TaildropFile
+	57,  // 25: sbox.daemon.TaildropInbox.receiving:type_name -> sbox.daemon.TaildropReceivingFile
+	59,  // 26: sbox.daemon.TaildropSendClientMessage.start:type_name -> sbox.daemon.TaildropSendStart
+	61,  // 27: sbox.daemon.TaildropSendClientMessage.chunk:type_name -> sbox.daemon.TaildropFileChunk
+	62,  // 28: sbox.daemon.TaildropSendClientMessage.fileDone:type_name -> sbox.daemon.TaildropFileDone
+	60,  // 29: sbox.daemon.TaildropSendStart.files:type_name -> sbox.daemon.TaildropOutgoingFile
+	64,  // 30: sbox.daemon.TaildropSendServerMessage.progress:type_name -> sbox.daemon.TaildropSendProgress
+	72,  // 31: sbox.daemon.USBProviderMessage.attach:type_name -> sbox.daemon.USBDeviceAttach
+	74,  // 32: sbox.daemon.USBProviderMessage.detach:type_name -> sbox.daemon.USBDeviceDetach
+	77,  // 33: sbox.daemon.USBProviderMessage.urbResponse:type_name -> sbox.daemon.USBURBResponse
+	75,  // 34: sbox.daemon.USBServerMessage.ready:type_name -> sbox.daemon.USBDeviceReady
+	76,  // 35: sbox.daemon.USBServerMessage.urbRequest:type_name -> sbox.daemon.USBURBRequest
+	79,  // 36: sbox.daemon.USBServerMessage.abort:type_name -> sbox.daemon.USBEndpointAbort
+	80,  // 37: sbox.daemon.USBServerMessage.error:type_name -> sbox.daemon.USBError
+	73,  // 38: sbox.daemon.USBDeviceDescriptor.interfaces:type_name -> sbox.daemon.USBInterface
+	71,  // 39: sbox.daemon.USBDeviceAttach.descriptor:type_name -> sbox.daemon.USBDeviceDescriptor
+	78,  // 40: sbox.daemon.USBURBRequest.isoPackets:type_name -> sbox.daemon.USBIsoPacket
+	78,  // 41: sbox.daemon.USBURBResponse.isoPackets:type_name -> sbox.daemon.USBIsoPacket
+	82,  // 42: sbox.daemon.USBIPServerStatusUpdate.servers:type_name -> sbox.daemon.USBIPServerStatus
+	83,  // 43: sbox.daemon.USBIPServerStatus.devices:type_name -> sbox.daemon.USBSharedDevice
+	71,  // 44: sbox.daemon.USBSharedDevice.descriptor:type_name -> sbox.daemon.USBDeviceDescriptor
+	3,   // 45: sbox.daemon.USBSharedDevice.backend:type_name -> sbox.daemon.USBBackend
+	2,   // 46: sbox.daemon.USBSharedDevice.state:type_name -> sbox.daemon.USBDeviceState
+	85,  // 47: sbox.daemon.OpenConnectStatusUpdate.endpoints:type_name -> sbox.daemon.OpenConnectEndpointStatus
+	87,  // 48: sbox.daemon.OpenConnectEndpointStatus.authChallenge:type_name -> sbox.daemon.OpenConnectAuthChallenge
+	86,  // 49: sbox.daemon.OpenConnectEndpointStatus.tunnelInfo:type_name -> sbox.daemon.OpenConnectTunnelInfo
+	88,  // 50: sbox.daemon.OpenConnectAuthChallenge.form:type_name -> sbox.daemon.OpenConnectAuthForm
+	91,  // 51: sbox.daemon.OpenConnectAuthChallenge.browser:type_name -> sbox.daemon.OpenConnectBrowserRequest
+	89,  // 52: sbox.daemon.OpenConnectAuthForm.fields:type_name -> sbox.daemon.OpenConnectAuthFormField
+	90,  // 53: sbox.daemon.OpenConnectAuthFormField.options:type_name -> sbox.daemon.OpenConnectAuthFormChoice
+	108, // 54: sbox.daemon.OpenConnectAuthFormResponse.values:type_name -> sbox.daemon.OpenConnectAuthFormResponse.ValuesEntry
+	92,  // 55: sbox.daemon.OpenConnectBrowserResult.cookies:type_name -> sbox.daemon.OpenConnectBrowserCookie
+	93,  // 56: sbox.daemon.OpenConnectBrowserResult.headers:type_name -> sbox.daemon.OpenConnectBrowserHeader
+	94,  // 57: sbox.daemon.OpenConnectAuthResponseSubmission.form:type_name -> sbox.daemon.OpenConnectAuthFormResponse
+	95,  // 58: sbox.daemon.OpenConnectAuthResponseSubmission.browser:type_name -> sbox.daemon.OpenConnectBrowserResult
+	99,  // 59: sbox.daemon.OpenVPNStatusUpdate.endpoints:type_name -> sbox.daemon.OpenVPNEndpointStatus
+	101, // 60: sbox.daemon.OpenVPNEndpointStatus.challenge:type_name -> sbox.daemon.OpenVPNChallenge
+	100, // 61: sbox.daemon.OpenVPNEndpointStatus.tunnelInfo:type_name -> sbox.daemon.OpenVPNTunnelInfo
+	105, // 62: sbox.daemon.NotificationEvent.send:type_name -> sbox.daemon.Notification
+	106, // 63: sbox.daemon.NotificationEvent.cancel:type_name -> sbox.daemon.NotificationCancel
+	0,   // 64: sbox.daemon.Log.Message.level:type_name -> sbox.daemon.LogLevel
+	109, // 65: sbox.daemon.StartedService.GetVersion:input_type -> google.protobuf.Empty
+	109, // 66: sbox.daemon.StartedService.SubscribeServiceStatus:input_type -> google.protobuf.Empty
+	109, // 67: sbox.daemon.StartedService.SubscribeLog:input_type -> google.protobuf.Empty
+	109, // 68: sbox.daemon.StartedService.GetDefaultLogLevel:input_type -> google.protobuf.Empty
+	109, // 69: sbox.daemon.StartedService.ClearLogs:input_type -> google.protobuf.Empty
+	7,   // 70: sbox.daemon.StartedService.SubscribeStatus:input_type -> sbox.daemon.SubscribeStatusRequest
+	109, // 71: sbox.daemon.StartedService.SubscribeGroups:input_type -> google.protobuf.Empty
+	109, // 72: sbox.daemon.StartedService.GetClashModeStatus:input_type -> google.protobuf.Empty
+	109, // 73: sbox.daemon.StartedService.SubscribeClashMode:input_type -> google.protobuf.Empty
+	17,  // 74: sbox.daemon.StartedService.SetClashMode:input_type -> sbox.daemon.ClashMode
+	14,  // 75: sbox.daemon.StartedService.URLTest:input_type -> sbox.daemon.URLTestRequest
+	15,  // 76: sbox.daemon.StartedService.SelectOutbound:input_type -> sbox.daemon.SelectOutboundRequest
+	16,  // 77: sbox.daemon.StartedService.SetGroupExpand:input_type -> sbox.daemon.SetGroupExpandRequest
+	19,  // 78: sbox.daemon.StartedService.SubscribeConnections:input_type -> sbox.daemon.SubscribeConnectionsRequest
+	24,  // 79: sbox.daemon.StartedService.CloseConnection:input_type -> sbox.daemon.CloseConnectionRequest
+	109, // 80: sbox.daemon.StartedService.CloseAllConnections:input_type -> google.protobuf.Empty
+	109, // 81: sbox.daemon.StartedService.GetDeprecatedWarnings:input_type -> google.protobuf.Empty
+	109, // 82: sbox.daemon.StartedService.GetStartedAt:input_type -> google.protobuf.Empty
+	109, // 83: sbox.daemon.StartedService.SubscribeOutbounds:input_type -> google.protobuf.Empty
+	29,  // 84: sbox.daemon.StartedService.StartNetworkQualityTest:input_type -> sbox.daemon.NetworkQualityTestRequest
+	31,  // 85: sbox.daemon.StartedService.StartSTUNTest:input_type -> sbox.daemon.STUNTestRequest
+	109, // 86: sbox.daemon.StartedService.SubscribeTailscaleStatus:input_type -> google.protobuf.Empty
+	37,  // 87: sbox.daemon.StartedService.StartTailscalePing:input_type -> sbox.daemon.TailscalePingRequest
+	39,  // 88: sbox.daemon.StartedService.SetTailscaleExitNode:input_type -> sbox.daemon.SetTailscaleExitNodeRequest
+	40,  // 89: sbox.daemon.StartedService.TailscaleLogout:input_type -> sbox.daemon.TailscaleLogoutRequest
+	41,  // 90: sbox.daemon.StartedService.GetTailscaleCertificate:input_type -> sbox.daemon.TailscaleCertificateRequest
+	43,  // 91: sbox.daemon.StartedService.StartTailscaleSSHSession:input_type -> sbox.daemon.TailscaleSSHClientMessage
+	53,  // 92: sbox.daemon.StartedService.SubscribeTaildropInbox:input_type -> sbox.daemon.SubscribeTaildropInboxRequest
+	54,  // 93: sbox.daemon.StartedService.MarkTaildropInboxRead:input_type -> sbox.daemon.MarkTaildropInboxReadRequest
+	58,  // 94: sbox.daemon.StartedService.SendTaildropFiles:input_type -> sbox.daemon.TaildropSendClientMessage
+	65,  // 95: sbox.daemon.StartedService.DownloadTaildropFile:input_type -> sbox.daemon.DownloadTaildropFileRequest
+	67,  // 96: sbox.daemon.StartedService.DeleteTaildropFile:input_type -> sbox.daemon.DeleteTaildropFileRequest
+	68,  // 97: sbox.daemon.StartedService.CancelTaildropReceiving:input_type -> sbox.daemon.CancelTaildropReceivingRequest
+	69,  // 98: sbox.daemon.StartedService.ProvideUSBDevices:input_type -> sbox.daemon.USBProviderMessage
+	109, // 99: sbox.daemon.StartedService.SubscribeUSBIPServerStatus:input_type -> google.protobuf.Empty
+	109, // 100: sbox.daemon.StartedService.SubscribeOpenConnectStatus:input_type -> google.protobuf.Empty
+	96,  // 101: sbox.daemon.StartedService.SubmitOpenConnectAuthResponse:input_type -> sbox.daemon.OpenConnectAuthResponseSubmission
+	97,  // 102: sbox.daemon.StartedService.CancelOpenConnectAuthChallenge:input_type -> sbox.daemon.OpenConnectAuthChallengeCancel
+	109, // 103: sbox.daemon.StartedService.SubscribeOpenVPNStatus:input_type -> google.protobuf.Empty
+	102, // 104: sbox.daemon.StartedService.SubmitOpenVPNChallengeResponse:input_type -> sbox.daemon.OpenVPNChallengeSubmission
+	103, // 105: sbox.daemon.StartedService.CancelOpenVPNChallenge:input_type -> sbox.daemon.OpenVPNChallengeCancel
+	109, // 106: sbox.daemon.StartedService.SubscribeNotifications:input_type -> google.protobuf.Empty
+	5,   // 107: sbox.daemon.StartedService.GetVersion:output_type -> sbox.daemon.Version
+	6,   // 108: sbox.daemon.StartedService.SubscribeServiceStatus:output_type -> sbox.daemon.ServiceStatus
+	8,   // 109: sbox.daemon.StartedService.SubscribeLog:output_type -> sbox.daemon.Log
+	9,   // 110: sbox.daemon.StartedService.GetDefaultLogLevel:output_type -> sbox.daemon.DefaultLogLevel
+	109, // 111: sbox.daemon.StartedService.ClearLogs:output_type -> google.protobuf.Empty
+	10,  // 112: sbox.daemon.StartedService.SubscribeStatus:output_type -> sbox.daemon.Status
+	11,  // 113: sbox.daemon.StartedService.SubscribeGroups:output_type -> sbox.daemon.Groups
+	18,  // 114: sbox.daemon.StartedService.GetClashModeStatus:output_type -> sbox.daemon.ClashModeStatus
+	17,  // 115: sbox.daemon.StartedService.SubscribeClashMode:output_type -> sbox.daemon.ClashMode
+	109, // 116: sbox.daemon.StartedService.SetClashMode:output_type -> google.protobuf.Empty
+	109, // 117: sbox.daemon.StartedService.URLTest:output_type -> google.protobuf.Empty
+	109, // 118: sbox.daemon.StartedService.SelectOutbound:output_type -> google.protobuf.Empty
+	109, // 119: sbox.daemon.StartedService.SetGroupExpand:output_type -> google.protobuf.Empty
+	21,  // 120: sbox.daemon.StartedService.SubscribeConnections:output_type -> sbox.daemon.ConnectionEvents
+	109, // 121: sbox.daemon.StartedService.CloseConnection:output_type -> google.protobuf.Empty
+	109, // 122: sbox.daemon.StartedService.CloseAllConnections:output_type -> google.protobuf.Empty
+	25,  // 123: sbox.daemon.StartedService.GetDeprecatedWarnings:output_type -> sbox.daemon.DeprecatedWarnings
+	27,  // 124: sbox.daemon.StartedService.GetStartedAt:output_type -> sbox.daemon.StartedAt
+	28,  // 125: sbox.daemon.StartedService.SubscribeOutbounds:output_type -> sbox.daemon.OutboundList
+	30,  // 126: sbox.daemon.StartedService.StartNetworkQualityTest:output_type -> sbox.daemon.NetworkQualityTestProgress
+	32,  // 127: sbox.daemon.StartedService.StartSTUNTest:output_type -> sbox.daemon.STUNTestProgress
+	33,  // 128: sbox.daemon.StartedService.SubscribeTailscaleStatus:output_type -> sbox.daemon.TailscaleStatusUpdate
+	38,  // 129: sbox.daemon.StartedService.StartTailscalePing:output_type -> sbox.daemon.TailscalePingResponse
+	109, // 130: sbox.daemon.StartedService.SetTailscaleExitNode:output_type -> google.protobuf.Empty
+	109, // 131: sbox.daemon.StartedService.TailscaleLogout:output_type -> google.protobuf.Empty
+	42,  // 132: sbox.daemon.StartedService.GetTailscaleCertificate:output_type -> sbox.daemon.TailscaleCertificate
+	47,  // 133: sbox.daemon.StartedService.StartTailscaleSSHSession:output_type -> sbox.daemon.TailscaleSSHServerMessage
+	55,  // 134: sbox.daemon.StartedService.SubscribeTaildropInbox:output_type -> sbox.daemon.TaildropInbox
+	109, // 135: sbox.daemon.StartedService.MarkTaildropInboxRead:output_type -> google.protobuf.Empty
+	63,  // 136: sbox.daemon.StartedService.SendTaildropFiles:output_type -> sbox.daemon.TaildropSendServerMessage
+	66,  // 137: sbox.daemon.StartedService.DownloadTaildropFile:output_type -> sbox.daemon.DownloadTaildropFileChunk
+	109, // 138: sbox.daemon.StartedService.DeleteTaildropFile:output_type -> google.protobuf.Empty
+	109, // 139: sbox.daemon.StartedService.CancelTaildropReceiving:output_type -> google.protobuf.Empty
+	70,  // 140: sbox.daemon.StartedService.ProvideUSBDevices:output_type -> sbox.daemon.USBServerMessage
+	81,  // 141: sbox.daemon.StartedService.SubscribeUSBIPServerStatus:output_type -> sbox.daemon.USBIPServerStatusUpdate
+	84,  // 142: sbox.daemon.StartedService.SubscribeOpenConnectStatus:output_type -> sbox.daemon.OpenConnectStatusUpdate
+	109, // 143: sbox.daemon.StartedService.SubmitOpenConnectAuthResponse:output_type -> google.protobuf.Empty
+	109, // 144: sbox.daemon.StartedService.CancelOpenConnectAuthChallenge:output_type -> google.protobuf.Empty
+	98,  // 145: sbox.daemon.StartedService.SubscribeOpenVPNStatus:output_type -> sbox.daemon.OpenVPNStatusUpdate
+	109, // 146: sbox.daemon.StartedService.SubmitOpenVPNChallengeResponse:output_type -> google.protobuf.Empty
+	109, // 147: sbox.daemon.StartedService.CancelOpenVPNChallenge:output_type -> google.protobuf.Empty
+	104, // 148: sbox.daemon.StartedService.SubscribeNotifications:output_type -> sbox.daemon.NotificationEvent
 	107, // [107:149] is the sub-list for method output_type
 	65,  // [65:107] is the sub-list for method input_type
 	65,  // [65:65] is the sub-list for extension type_name

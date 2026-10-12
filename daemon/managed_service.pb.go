@@ -1,13 +1,12 @@
 package daemon
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -161,7 +160,7 @@ func (x *SetSystemProxyEnabledRequest) GetEnabled() bool {
 
 type DebugCrashRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          DebugCrashRequest_Type `protobuf:"varint,1,opt,name=type,proto3,enum=daemon.DebugCrashRequest_Type" json:"type,omitempty"`
+	Type          DebugCrashRequest_Type `protobuf:"varint,1,opt,name=type,proto3,enum=sbox.daemon.DebugCrashRequest_Type" json:"type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -207,24 +206,24 @@ var File_daemon_managed_service_proto protoreflect.FileDescriptor
 
 const file_daemon_managed_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdaemon/managed_service.proto\x12\x06daemon\x1a\x1bgoogle/protobuf/empty.proto\"K\n" +
+	"\x1cdaemon/managed_service.proto\x12\vsbox.daemon\x1a\x1bgoogle/protobuf/empty.proto\"K\n" +
 	"\x11SystemProxyStatus\x12\x1c\n" +
 	"\tavailable\x18\x01 \x01(\bR\tavailable\x12\x18\n" +
 	"\aenabled\x18\x02 \x01(\bR\aenabled\"8\n" +
 	"\x1cSetSystemProxyEnabledRequest\x12\x18\n" +
-	"\aenabled\x18\x01 \x01(\bR\aenabled\"c\n" +
-	"\x11DebugCrashRequest\x122\n" +
-	"\x04type\x18\x01 \x01(\x0e2\x1e.daemon.DebugCrashRequest.TypeR\x04type\"\x1a\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\"h\n" +
+	"\x11DebugCrashRequest\x127\n" +
+	"\x04type\x18\x01 \x01(\x0e2#.sbox.daemon.DebugCrashRequest.TypeR\x04type\"\x1a\n" +
 	"\x04Type\x12\x06\n" +
 	"\x02GO\x10\x00\x12\n" +
 	"\n" +
-	"\x06NATIVE\x10\x012\xc6\x03\n" +
+	"\x06NATIVE\x10\x012\xd5\x03\n" +
 	"\x0eManagedService\x12=\n" +
 	"\vStopService\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x12?\n" +
-	"\rReloadService\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x12K\n" +
-	"\x14GetSystemProxyStatus\x12\x16.google.protobuf.Empty\x1a\x19.daemon.SystemProxyStatus\"\x00\x12W\n" +
-	"\x15SetSystemProxyEnabled\x12$.daemon.SetSystemProxyEnabledRequest\x1a\x16.google.protobuf.Empty\"\x00\x12H\n" +
-	"\x11TriggerDebugCrash\x12\x19.daemon.DebugCrashRequest\x1a\x16.google.protobuf.Empty\"\x00\x12D\n" +
+	"\rReloadService\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x12P\n" +
+	"\x14GetSystemProxyStatus\x12\x16.google.protobuf.Empty\x1a\x1e.sbox.daemon.SystemProxyStatus\"\x00\x12\\\n" +
+	"\x15SetSystemProxyEnabled\x12).sbox.daemon.SetSystemProxyEnabledRequest\x1a\x16.google.protobuf.Empty\"\x00\x12M\n" +
+	"\x11TriggerDebugCrash\x12\x1e.sbox.daemon.DebugCrashRequest\x1a\x16.google.protobuf.Empty\"\x00\x12D\n" +
 	"\x10TriggerOOMReport\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\"\x00B%Z#github.com/sagernet/sing-box/daemonb\x06proto3"
 
 var (
@@ -239,32 +238,29 @@ func file_daemon_managed_service_proto_rawDescGZIP() []byte {
 	return file_daemon_managed_service_proto_rawDescData
 }
 
-var (
-	file_daemon_managed_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-	file_daemon_managed_service_proto_msgTypes  = make([]protoimpl.MessageInfo, 3)
-	file_daemon_managed_service_proto_goTypes   = []any{
-		DebugCrashRequest_Type(0),            // 0: daemon.DebugCrashRequest.Type
-		(*SystemProxyStatus)(nil),            // 1: daemon.SystemProxyStatus
-		(*SetSystemProxyEnabledRequest)(nil), // 2: daemon.SetSystemProxyEnabledRequest
-		(*DebugCrashRequest)(nil),            // 3: daemon.DebugCrashRequest
-		(*emptypb.Empty)(nil),                // 4: google.protobuf.Empty
-	}
-)
-
+var file_daemon_managed_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_daemon_managed_service_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_daemon_managed_service_proto_goTypes = []any{
+	(DebugCrashRequest_Type)(0),          // 0: sbox.daemon.DebugCrashRequest.Type
+	(*SystemProxyStatus)(nil),            // 1: sbox.daemon.SystemProxyStatus
+	(*SetSystemProxyEnabledRequest)(nil), // 2: sbox.daemon.SetSystemProxyEnabledRequest
+	(*DebugCrashRequest)(nil),            // 3: sbox.daemon.DebugCrashRequest
+	(*emptypb.Empty)(nil),                // 4: google.protobuf.Empty
+}
 var file_daemon_managed_service_proto_depIdxs = []int32{
-	0, // 0: daemon.DebugCrashRequest.type:type_name -> daemon.DebugCrashRequest.Type
-	4, // 1: daemon.ManagedService.StopService:input_type -> google.protobuf.Empty
-	4, // 2: daemon.ManagedService.ReloadService:input_type -> google.protobuf.Empty
-	4, // 3: daemon.ManagedService.GetSystemProxyStatus:input_type -> google.protobuf.Empty
-	2, // 4: daemon.ManagedService.SetSystemProxyEnabled:input_type -> daemon.SetSystemProxyEnabledRequest
-	3, // 5: daemon.ManagedService.TriggerDebugCrash:input_type -> daemon.DebugCrashRequest
-	4, // 6: daemon.ManagedService.TriggerOOMReport:input_type -> google.protobuf.Empty
-	4, // 7: daemon.ManagedService.StopService:output_type -> google.protobuf.Empty
-	4, // 8: daemon.ManagedService.ReloadService:output_type -> google.protobuf.Empty
-	1, // 9: daemon.ManagedService.GetSystemProxyStatus:output_type -> daemon.SystemProxyStatus
-	4, // 10: daemon.ManagedService.SetSystemProxyEnabled:output_type -> google.protobuf.Empty
-	4, // 11: daemon.ManagedService.TriggerDebugCrash:output_type -> google.protobuf.Empty
-	4, // 12: daemon.ManagedService.TriggerOOMReport:output_type -> google.protobuf.Empty
+	0, // 0: sbox.daemon.DebugCrashRequest.type:type_name -> sbox.daemon.DebugCrashRequest.Type
+	4, // 1: sbox.daemon.ManagedService.StopService:input_type -> google.protobuf.Empty
+	4, // 2: sbox.daemon.ManagedService.ReloadService:input_type -> google.protobuf.Empty
+	4, // 3: sbox.daemon.ManagedService.GetSystemProxyStatus:input_type -> google.protobuf.Empty
+	2, // 4: sbox.daemon.ManagedService.SetSystemProxyEnabled:input_type -> sbox.daemon.SetSystemProxyEnabledRequest
+	3, // 5: sbox.daemon.ManagedService.TriggerDebugCrash:input_type -> sbox.daemon.DebugCrashRequest
+	4, // 6: sbox.daemon.ManagedService.TriggerOOMReport:input_type -> google.protobuf.Empty
+	4, // 7: sbox.daemon.ManagedService.StopService:output_type -> google.protobuf.Empty
+	4, // 8: sbox.daemon.ManagedService.ReloadService:output_type -> google.protobuf.Empty
+	1, // 9: sbox.daemon.ManagedService.GetSystemProxyStatus:output_type -> sbox.daemon.SystemProxyStatus
+	4, // 10: sbox.daemon.ManagedService.SetSystemProxyEnabled:output_type -> google.protobuf.Empty
+	4, // 11: sbox.daemon.ManagedService.TriggerDebugCrash:output_type -> google.protobuf.Empty
+	4, // 12: sbox.daemon.ManagedService.TriggerOOMReport:output_type -> google.protobuf.Empty
 	7, // [7:13] is the sub-list for method output_type
 	1, // [1:7] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name

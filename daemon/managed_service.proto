@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package daemon;
+package sbox.daemon;
 option go_package = "github.com/sagernet/sing-box/daemon";
 
 import "google/protobuf/empty.proto";

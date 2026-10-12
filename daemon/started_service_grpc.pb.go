@@ -2,7 +2,6 @@ package daemon
 
 import (
 	context "context"
-
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -15,48 +14,48 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	StartedService_GetVersion_FullMethodName                     = "/daemon.StartedService/GetVersion"
-	StartedService_SubscribeServiceStatus_FullMethodName         = "/daemon.StartedService/SubscribeServiceStatus"
-	StartedService_SubscribeLog_FullMethodName                   = "/daemon.StartedService/SubscribeLog"
-	StartedService_GetDefaultLogLevel_FullMethodName             = "/daemon.StartedService/GetDefaultLogLevel"
-	StartedService_ClearLogs_FullMethodName                      = "/daemon.StartedService/ClearLogs"
-	StartedService_SubscribeStatus_FullMethodName                = "/daemon.StartedService/SubscribeStatus"
-	StartedService_SubscribeGroups_FullMethodName                = "/daemon.StartedService/SubscribeGroups"
-	StartedService_GetClashModeStatus_FullMethodName             = "/daemon.StartedService/GetClashModeStatus"
-	StartedService_SubscribeClashMode_FullMethodName             = "/daemon.StartedService/SubscribeClashMode"
-	StartedService_SetClashMode_FullMethodName                   = "/daemon.StartedService/SetClashMode"
-	StartedService_URLTest_FullMethodName                        = "/daemon.StartedService/URLTest"
-	StartedService_SelectOutbound_FullMethodName                 = "/daemon.StartedService/SelectOutbound"
-	StartedService_SetGroupExpand_FullMethodName                 = "/daemon.StartedService/SetGroupExpand"
-	StartedService_SubscribeConnections_FullMethodName           = "/daemon.StartedService/SubscribeConnections"
-	StartedService_CloseConnection_FullMethodName                = "/daemon.StartedService/CloseConnection"
-	StartedService_CloseAllConnections_FullMethodName            = "/daemon.StartedService/CloseAllConnections"
-	StartedService_GetDeprecatedWarnings_FullMethodName          = "/daemon.StartedService/GetDeprecatedWarnings"
-	StartedService_GetStartedAt_FullMethodName                   = "/daemon.StartedService/GetStartedAt"
-	StartedService_SubscribeOutbounds_FullMethodName             = "/daemon.StartedService/SubscribeOutbounds"
-	StartedService_StartNetworkQualityTest_FullMethodName        = "/daemon.StartedService/StartNetworkQualityTest"
-	StartedService_StartSTUNTest_FullMethodName                  = "/daemon.StartedService/StartSTUNTest"
-	StartedService_SubscribeTailscaleStatus_FullMethodName       = "/daemon.StartedService/SubscribeTailscaleStatus"
-	StartedService_StartTailscalePing_FullMethodName             = "/daemon.StartedService/StartTailscalePing"
-	StartedService_SetTailscaleExitNode_FullMethodName           = "/daemon.StartedService/SetTailscaleExitNode"
-	StartedService_TailscaleLogout_FullMethodName                = "/daemon.StartedService/TailscaleLogout"
-	StartedService_GetTailscaleCertificate_FullMethodName        = "/daemon.StartedService/GetTailscaleCertificate"
-	StartedService_StartTailscaleSSHSession_FullMethodName       = "/daemon.StartedService/StartTailscaleSSHSession"
-	StartedService_SubscribeTaildropInbox_FullMethodName         = "/daemon.StartedService/SubscribeTaildropInbox"
-	StartedService_MarkTaildropInboxRead_FullMethodName          = "/daemon.StartedService/MarkTaildropInboxRead"
-	StartedService_SendTaildropFiles_FullMethodName              = "/daemon.StartedService/SendTaildropFiles"
-	StartedService_DownloadTaildropFile_FullMethodName           = "/daemon.StartedService/DownloadTaildropFile"
-	StartedService_DeleteTaildropFile_FullMethodName             = "/daemon.StartedService/DeleteTaildropFile"
-	StartedService_CancelTaildropReceiving_FullMethodName        = "/daemon.StartedService/CancelTaildropReceiving"
-	StartedService_ProvideUSBDevices_FullMethodName              = "/daemon.StartedService/ProvideUSBDevices"
-	StartedService_SubscribeUSBIPServerStatus_FullMethodName     = "/daemon.StartedService/SubscribeUSBIPServerStatus"
-	StartedService_SubscribeOpenConnectStatus_FullMethodName     = "/daemon.StartedService/SubscribeOpenConnectStatus"
-	StartedService_SubmitOpenConnectAuthResponse_FullMethodName  = "/daemon.StartedService/SubmitOpenConnectAuthResponse"
-	StartedService_CancelOpenConnectAuthChallenge_FullMethodName = "/daemon.StartedService/CancelOpenConnectAuthChallenge"
-	StartedService_SubscribeOpenVPNStatus_FullMethodName         = "/daemon.StartedService/SubscribeOpenVPNStatus"
-	StartedService_SubmitOpenVPNChallengeResponse_FullMethodName = "/daemon.StartedService/SubmitOpenVPNChallengeResponse"
-	StartedService_CancelOpenVPNChallenge_FullMethodName         = "/daemon.StartedService/CancelOpenVPNChallenge"
-	StartedService_SubscribeNotifications_FullMethodName         = "/daemon.StartedService/SubscribeNotifications"
+	StartedService_GetVersion_FullMethodName                     = "/sbox.daemon.StartedService/GetVersion"
+	StartedService_SubscribeServiceStatus_FullMethodName         = "/sbox.daemon.StartedService/SubscribeServiceStatus"
+	StartedService_SubscribeLog_FullMethodName                   = "/sbox.daemon.StartedService/SubscribeLog"
+	StartedService_GetDefaultLogLevel_FullMethodName             = "/sbox.daemon.StartedService/GetDefaultLogLevel"
+	StartedService_ClearLogs_FullMethodName                      = "/sbox.daemon.StartedService/ClearLogs"
+	StartedService_SubscribeStatus_FullMethodName                = "/sbox.daemon.StartedService/SubscribeStatus"
+	StartedService_SubscribeGroups_FullMethodName                = "/sbox.daemon.StartedService/SubscribeGroups"
+	StartedService_GetClashModeStatus_FullMethodName             = "/sbox.daemon.StartedService/GetClashModeStatus"
+	StartedService_SubscribeClashMode_FullMethodName             = "/sbox.daemon.StartedService/SubscribeClashMode"
+	StartedService_SetClashMode_FullMethodName                   = "/sbox.daemon.StartedService/SetClashMode"
+	StartedService_URLTest_FullMethodName                        = "/sbox.daemon.StartedService/URLTest"
+	StartedService_SelectOutbound_FullMethodName                 = "/sbox.daemon.StartedService/SelectOutbound"
+	StartedService_SetGroupExpand_FullMethodName                 = "/sbox.daemon.StartedService/SetGroupExpand"
+	StartedService_SubscribeConnections_FullMethodName           = "/sbox.daemon.StartedService/SubscribeConnections"
+	StartedService_CloseConnection_FullMethodName                = "/sbox.daemon.StartedService/CloseConnection"
+	StartedService_CloseAllConnections_FullMethodName            = "/sbox.daemon.StartedService/CloseAllConnections"
+	StartedService_GetDeprecatedWarnings_FullMethodName          = "/sbox.daemon.StartedService/GetDeprecatedWarnings"
+	StartedService_GetStartedAt_FullMethodName                   = "/sbox.daemon.StartedService/GetStartedAt"
+	StartedService_SubscribeOutbounds_FullMethodName             = "/sbox.daemon.StartedService/SubscribeOutbounds"
+	StartedService_StartNetworkQualityTest_FullMethodName        = "/sbox.daemon.StartedService/StartNetworkQualityTest"
+	StartedService_StartSTUNTest_FullMethodName                  = "/sbox.daemon.StartedService/StartSTUNTest"
+	StartedService_SubscribeTailscaleStatus_FullMethodName       = "/sbox.daemon.StartedService/SubscribeTailscaleStatus"
+	StartedService_StartTailscalePing_FullMethodName             = "/sbox.daemon.StartedService/StartTailscalePing"
+	StartedService_SetTailscaleExitNode_FullMethodName           = "/sbox.daemon.StartedService/SetTailscaleExitNode"
+	StartedService_TailscaleLogout_FullMethodName                = "/sbox.daemon.StartedService/TailscaleLogout"
+	StartedService_GetTailscaleCertificate_FullMethodName        = "/sbox.daemon.StartedService/GetTailscaleCertificate"
+	StartedService_StartTailscaleSSHSession_FullMethodName       = "/sbox.daemon.StartedService/StartTailscaleSSHSession"
+	StartedService_SubscribeTaildropInbox_FullMethodName         = "/sbox.daemon.StartedService/SubscribeTaildropInbox"
+	StartedService_MarkTaildropInboxRead_FullMethodName          = "/sbox.daemon.StartedService/MarkTaildropInboxRead"
+	StartedService_SendTaildropFiles_FullMethodName              = "/sbox.daemon.StartedService/SendTaildropFiles"
+	StartedService_DownloadTaildropFile_FullMethodName           = "/sbox.daemon.StartedService/DownloadTaildropFile"
+	StartedService_DeleteTaildropFile_FullMethodName             = "/sbox.daemon.StartedService/DeleteTaildropFile"
+	StartedService_CancelTaildropReceiving_FullMethodName        = "/sbox.daemon.StartedService/CancelTaildropReceiving"
+	StartedService_ProvideUSBDevices_FullMethodName              = "/sbox.daemon.StartedService/ProvideUSBDevices"
+	StartedService_SubscribeUSBIPServerStatus_FullMethodName     = "/sbox.daemon.StartedService/SubscribeUSBIPServerStatus"
+	StartedService_SubscribeOpenConnectStatus_FullMethodName     = "/sbox.daemon.StartedService/SubscribeOpenConnectStatus"
+	StartedService_SubmitOpenConnectAuthResponse_FullMethodName  = "/sbox.daemon.StartedService/SubmitOpenConnectAuthResponse"
+	StartedService_CancelOpenConnectAuthChallenge_FullMethodName = "/sbox.daemon.StartedService/CancelOpenConnectAuthChallenge"
+	StartedService_SubscribeOpenVPNStatus_FullMethodName         = "/sbox.daemon.StartedService/SubscribeOpenVPNStatus"
+	StartedService_SubmitOpenVPNChallengeResponse_FullMethodName = "/sbox.daemon.StartedService/SubmitOpenVPNChallengeResponse"
+	StartedService_CancelOpenVPNChallenge_FullMethodName         = "/sbox.daemon.StartedService/CancelOpenVPNChallenge"
+	StartedService_SubscribeNotifications_FullMethodName         = "/sbox.daemon.StartedService/SubscribeNotifications"
 )
 
 // StartedServiceClient is the client API for StartedService service.
@@ -756,167 +755,126 @@ type UnimplementedStartedServiceServer struct{}
 func (UnimplementedStartedServiceServer) GetVersion(context.Context, *emptypb.Empty) (*Version, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVersion not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeServiceStatus(*emptypb.Empty, grpc.ServerStreamingServer[ServiceStatus]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeServiceStatus not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeLog(*emptypb.Empty, grpc.ServerStreamingServer[Log]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeLog not implemented")
 }
-
 func (UnimplementedStartedServiceServer) GetDefaultLogLevel(context.Context, *emptypb.Empty) (*DefaultLogLevel, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDefaultLogLevel not implemented")
 }
-
 func (UnimplementedStartedServiceServer) ClearLogs(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClearLogs not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeStatus(*SubscribeStatusRequest, grpc.ServerStreamingServer[Status]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeStatus not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeGroups(*emptypb.Empty, grpc.ServerStreamingServer[Groups]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeGroups not implemented")
 }
-
 func (UnimplementedStartedServiceServer) GetClashModeStatus(context.Context, *emptypb.Empty) (*ClashModeStatus, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetClashModeStatus not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeClashMode(*emptypb.Empty, grpc.ServerStreamingServer[ClashMode]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeClashMode not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SetClashMode(context.Context, *ClashMode) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetClashMode not implemented")
 }
-
 func (UnimplementedStartedServiceServer) URLTest(context.Context, *URLTestRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method URLTest not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SelectOutbound(context.Context, *SelectOutboundRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method SelectOutbound not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SetGroupExpand(context.Context, *SetGroupExpandRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetGroupExpand not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeConnections(*SubscribeConnectionsRequest, grpc.ServerStreamingServer[ConnectionEvents]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeConnections not implemented")
 }
-
 func (UnimplementedStartedServiceServer) CloseConnection(context.Context, *CloseConnectionRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method CloseConnection not implemented")
 }
-
 func (UnimplementedStartedServiceServer) CloseAllConnections(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method CloseAllConnections not implemented")
 }
-
 func (UnimplementedStartedServiceServer) GetDeprecatedWarnings(context.Context, *emptypb.Empty) (*DeprecatedWarnings, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDeprecatedWarnings not implemented")
 }
-
 func (UnimplementedStartedServiceServer) GetStartedAt(context.Context, *emptypb.Empty) (*StartedAt, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetStartedAt not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeOutbounds(*emptypb.Empty, grpc.ServerStreamingServer[OutboundList]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeOutbounds not implemented")
 }
-
 func (UnimplementedStartedServiceServer) StartNetworkQualityTest(*NetworkQualityTestRequest, grpc.ServerStreamingServer[NetworkQualityTestProgress]) error {
 	return status.Error(codes.Unimplemented, "method StartNetworkQualityTest not implemented")
 }
-
 func (UnimplementedStartedServiceServer) StartSTUNTest(*STUNTestRequest, grpc.ServerStreamingServer[STUNTestProgress]) error {
 	return status.Error(codes.Unimplemented, "method StartSTUNTest not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeTailscaleStatus(*emptypb.Empty, grpc.ServerStreamingServer[TailscaleStatusUpdate]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeTailscaleStatus not implemented")
 }
-
 func (UnimplementedStartedServiceServer) StartTailscalePing(*TailscalePingRequest, grpc.ServerStreamingServer[TailscalePingResponse]) error {
 	return status.Error(codes.Unimplemented, "method StartTailscalePing not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SetTailscaleExitNode(context.Context, *SetTailscaleExitNodeRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetTailscaleExitNode not implemented")
 }
-
 func (UnimplementedStartedServiceServer) TailscaleLogout(context.Context, *TailscaleLogoutRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method TailscaleLogout not implemented")
 }
-
 func (UnimplementedStartedServiceServer) GetTailscaleCertificate(context.Context, *TailscaleCertificateRequest) (*TailscaleCertificate, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTailscaleCertificate not implemented")
 }
-
 func (UnimplementedStartedServiceServer) StartTailscaleSSHSession(grpc.BidiStreamingServer[TailscaleSSHClientMessage, TailscaleSSHServerMessage]) error {
 	return status.Error(codes.Unimplemented, "method StartTailscaleSSHSession not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeTaildropInbox(*SubscribeTaildropInboxRequest, grpc.ServerStreamingServer[TaildropInbox]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeTaildropInbox not implemented")
 }
-
 func (UnimplementedStartedServiceServer) MarkTaildropInboxRead(context.Context, *MarkTaildropInboxReadRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method MarkTaildropInboxRead not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SendTaildropFiles(grpc.BidiStreamingServer[TaildropSendClientMessage, TaildropSendServerMessage]) error {
 	return status.Error(codes.Unimplemented, "method SendTaildropFiles not implemented")
 }
-
 func (UnimplementedStartedServiceServer) DownloadTaildropFile(*DownloadTaildropFileRequest, grpc.ServerStreamingServer[DownloadTaildropFileChunk]) error {
 	return status.Error(codes.Unimplemented, "method DownloadTaildropFile not implemented")
 }
-
 func (UnimplementedStartedServiceServer) DeleteTaildropFile(context.Context, *DeleteTaildropFileRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteTaildropFile not implemented")
 }
-
 func (UnimplementedStartedServiceServer) CancelTaildropReceiving(context.Context, *CancelTaildropReceivingRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method CancelTaildropReceiving not implemented")
 }
-
 func (UnimplementedStartedServiceServer) ProvideUSBDevices(grpc.BidiStreamingServer[USBProviderMessage, USBServerMessage]) error {
 	return status.Error(codes.Unimplemented, "method ProvideUSBDevices not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeUSBIPServerStatus(*emptypb.Empty, grpc.ServerStreamingServer[USBIPServerStatusUpdate]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeUSBIPServerStatus not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeOpenConnectStatus(*emptypb.Empty, grpc.ServerStreamingServer[OpenConnectStatusUpdate]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeOpenConnectStatus not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubmitOpenConnectAuthResponse(context.Context, *OpenConnectAuthResponseSubmission) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubmitOpenConnectAuthResponse not implemented")
 }
-
 func (UnimplementedStartedServiceServer) CancelOpenConnectAuthChallenge(context.Context, *OpenConnectAuthChallengeCancel) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method CancelOpenConnectAuthChallenge not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeOpenVPNStatus(*emptypb.Empty, grpc.ServerStreamingServer[OpenVPNStatusUpdate]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeOpenVPNStatus not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubmitOpenVPNChallengeResponse(context.Context, *OpenVPNChallengeSubmission) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubmitOpenVPNChallengeResponse not implemented")
 }
-
 func (UnimplementedStartedServiceServer) CancelOpenVPNChallenge(context.Context, *OpenVPNChallengeCancel) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method CancelOpenVPNChallenge not implemented")
 }
-
 func (UnimplementedStartedServiceServer) SubscribeNotifications(*emptypb.Empty, grpc.ServerStreamingServer[NotificationEvent]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeNotifications not implemented")
 }
@@ -1549,7 +1507,7 @@ type StartedService_SubscribeNotificationsServer = grpc.ServerStreamingServer[No
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var StartedService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "daemon.StartedService",
+	ServiceName: "sbox.daemon.StartedService",
 	HandlerType: (*StartedServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

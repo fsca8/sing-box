@@ -2,7 +2,6 @@ package daemon
 
 import (
 	context "context"
-
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -15,12 +14,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagedService_StopService_FullMethodName           = "/daemon.ManagedService/StopService"
-	ManagedService_ReloadService_FullMethodName         = "/daemon.ManagedService/ReloadService"
-	ManagedService_GetSystemProxyStatus_FullMethodName  = "/daemon.ManagedService/GetSystemProxyStatus"
-	ManagedService_SetSystemProxyEnabled_FullMethodName = "/daemon.ManagedService/SetSystemProxyEnabled"
-	ManagedService_TriggerDebugCrash_FullMethodName     = "/daemon.ManagedService/TriggerDebugCrash"
-	ManagedService_TriggerOOMReport_FullMethodName      = "/daemon.ManagedService/TriggerOOMReport"
+	ManagedService_StopService_FullMethodName           = "/sbox.daemon.ManagedService/StopService"
+	ManagedService_ReloadService_FullMethodName         = "/sbox.daemon.ManagedService/ReloadService"
+	ManagedService_GetSystemProxyStatus_FullMethodName  = "/sbox.daemon.ManagedService/GetSystemProxyStatus"
+	ManagedService_SetSystemProxyEnabled_FullMethodName = "/sbox.daemon.ManagedService/SetSystemProxyEnabled"
+	ManagedService_TriggerDebugCrash_FullMethodName     = "/sbox.daemon.ManagedService/TriggerDebugCrash"
+	ManagedService_TriggerOOMReport_FullMethodName      = "/sbox.daemon.ManagedService/TriggerOOMReport"
 )
 
 // ManagedServiceClient is the client API for ManagedService service.
@@ -126,23 +125,18 @@ type UnimplementedManagedServiceServer struct{}
 func (UnimplementedManagedServiceServer) StopService(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method StopService not implemented")
 }
-
 func (UnimplementedManagedServiceServer) ReloadService(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReloadService not implemented")
 }
-
 func (UnimplementedManagedServiceServer) GetSystemProxyStatus(context.Context, *emptypb.Empty) (*SystemProxyStatus, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSystemProxyStatus not implemented")
 }
-
 func (UnimplementedManagedServiceServer) SetSystemProxyEnabled(context.Context, *SetSystemProxyEnabledRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetSystemProxyEnabled not implemented")
 }
-
 func (UnimplementedManagedServiceServer) TriggerDebugCrash(context.Context, *DebugCrashRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method TriggerDebugCrash not implemented")
 }
-
 func (UnimplementedManagedServiceServer) TriggerOOMReport(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method TriggerOOMReport not implemented")
 }
@@ -279,7 +273,7 @@ func _ManagedService_TriggerOOMReport_Handler(srv interface{}, ctx context.Conte
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var ManagedService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "daemon.ManagedService",
+	ServiceName: "sbox.daemon.ManagedService",
 	HandlerType: (*ManagedServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
