@@ -39,7 +39,7 @@ func main() {
 	logFactory := log.NewDefaultFactory(context.Background(), log.Formatter{
 		BaseTime:      time.Now(),
 		DisableColors: true,
-	}, os.Stderr, "", nil, false)
+	}, os.Stderr, "", 0, nil, false)
 	common.Must(logFactory.Start())
 	log.SetStdLogger(logFactory.Logger())
 	err := mainCommand.Execute()

@@ -50,11 +50,25 @@ func New(options Options) (Factory, error) {
 		FullTimestamp:    logOptions.Timestamp,
 		TimestampFormat:  "-0700 2006-01-02 15:04:05",
 	}
+	// Log file size cap (circular overwrite): default 100 MB, configurable
+	// with log.max_size_mb, negative disables the cap.
+	var logFileMaxSize int64
+	if logFilePath != "" {
+		switch {
+		case logOptions.MaxSizeMB > 0:
+			logFileMaxSize = int64(logOptions.MaxSizeMB) << 20
+		case logOptions.MaxSizeMB == 0:
+			logFileMaxSize = DefaultLogFileMaxSize
+		default:
+			logFileMaxSize = 0 // unlimited
+		}
+	}
 	factory := NewDefaultFactory(
 		options.Context,
 		logFormatter,
 		logWriter,
 		logFilePath,
+		logFileMaxSize,
 		options.PlatformWriter,
 		options.Observable,
 	)

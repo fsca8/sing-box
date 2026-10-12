@@ -16,6 +16,7 @@ func init() {
 		Formatter{BaseTime: time.Now()},
 		os.Stderr,
 		"",
+		0,
 		nil,
 		false,
 	)

@@ -11,7 +11,6 @@ import (
 	"github.com/sagernet/sing/common"
 	F "github.com/sagernet/sing/common/format"
 	"github.com/sagernet/sing/common/observable"
-	"github.com/sagernet/sing/service/filemanager"
 )
 
 var _ ObservableFactory = (*defaultFactory)(nil)
@@ -23,6 +22,8 @@ type defaultFactory struct {
 	writer            io.Writer
 	file              *os.File
 	filePath          string
+	fileMaxSize       int64
+	fileWriter        *rotatingFileWriter
 	platformWriters   atomic.Pointer[[]PlatformWriter]
 	needConsole       bool
 	needObservable    bool
@@ -41,12 +42,12 @@ type pendingEntry struct {
 	message   string
 	timestamp time.Time
 }
-
 func NewDefaultFactory(
 	ctx context.Context,
 	formatter Formatter,
 	writer io.Writer,
 	filePath string,
+	fileMaxSize int64,
 	platformWriter PlatformWriter,
 	needObservable bool,
 ) ObservableFactory {
@@ -60,6 +61,7 @@ func NewDefaultFactory(
 		writer:         writer,
 		filePath:       filePath,
 		needConsole:    writer != io.Discard || filePath != "",
+		fileMaxSize:    fileMaxSize,
 		needObservable: needObservable,
 		level:          LevelTrace,
 		subscriber:     observable.NewSubscriber[Entry](128),
@@ -76,12 +78,15 @@ func NewDefaultFactory(
 func (f *defaultFactory) Start() error {
 	var err error
 	if f.filePath != "" {
-		logFile, openErr := filemanager.OpenFile(f.ctx, f.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		// Size-capped writer: the log file cannot grow past fileMaxSize,
+		// oldest lines are dropped first (see rotatingFileWriter).
+		fileWriter, openErr := newRotatingFileWriter(f.ctx, f.filePath, f.fileMaxSize)
 		if openErr != nil {
 			err = openErr
 		} else {
-			f.writer = logFile
-			f.file = logFile
+			f.writer = fileWriter
+			f.fileWriter = fileWriter
+			f.file = fileWriter.file
 		}
 		f.needConsole = f.writer != io.Discard
 	}

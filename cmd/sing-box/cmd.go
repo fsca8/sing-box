@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -23,6 +24,7 @@ var (
 	configDirectories []string
 	workingDir        string
 	disableColor      bool
+	exeDir            string // resolved once in init()
 )
 
 var mainCommand = &cobra.Command{
@@ -35,6 +37,11 @@ func init() {
 	mainCommand.PersistentFlags().StringArrayVarP(&configDirectories, "config-directory", "C", nil, "set configuration directory path")
 	mainCommand.PersistentFlags().StringVarP(&workingDir, "directory", "D", "", "set working directory")
 	mainCommand.PersistentFlags().BoolVarP(&disableColor, "disable-color", "", false, "disable color output")
+	if exe, err := os.Executable(); err == nil {
+		exeDir = filepath.Dir(exe)
+	} else {
+		exeDir = "."
+	}
 }
 
 func preRun(cmd *cobra.Command, args []string) {
@@ -53,7 +60,7 @@ func preRun(cmd *cobra.Command, args []string) {
 		globalCtx = filemanager.WithDefault(globalCtx, "", "", sudoUID, sudoGID)
 	}
 	if disableColor {
-		logFactory := log.NewDefaultFactory(context.Background(), log.Formatter{BaseTime: time.Now(), DisableColors: true}, os.Stderr, "", nil, false)
+		logFactory := log.NewDefaultFactory(context.Background(), log.Formatter{BaseTime: time.Now(), DisableColors: true}, os.Stderr, "", 0, nil, false)
 		common.Must(logFactory.Start())
 		log.SetStdLogger(logFactory.Logger())
 	}

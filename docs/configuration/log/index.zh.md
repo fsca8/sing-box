@@ -8,10 +8,10 @@
     "disabled": false,
     "level": "info",
     "output": "box.log",
-    "timestamp": true
+    "timestamp": true,
+    "max_size_mb": 100
   }
 }
-
 ```
 
 ### 字段
@@ -31,3 +31,11 @@
 #### timestamp
 
 添加时间到每行。
+
+#### max_size_mb
+
+日志文件的最大大小（MB），仅在 `output` 为文件路径时生效。
+
+达到上限后优先丢弃最旧的日志行（循环覆盖写），文件不会超过该上限，且始终保留最近的日志。
+
+默认使用 `100`（100 MB），负数表示不限制。
