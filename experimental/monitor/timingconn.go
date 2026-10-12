@@ -32,13 +32,13 @@ import (
 //     NOT imply a failed TCP handshake.
 type TimingConn struct {
 	net.Conn
-	firstWrite  atomic.Int64 // UnixNano of first Write call
-	firstRead   atomic.Int64 // UnixNano of first Read that returns data
-	recorded    atomic.Bool  // ensure we only record once
-	remoteAddr  string
-	connID      string
-	domain      string
-	outbound    string
+	firstWrite atomic.Int64 // UnixNano of first Write call
+	firstRead  atomic.Int64 // UnixNano of first Read that returns data
+	recorded   atomic.Bool  // ensure we only record once
+	remoteAddr string
+	connID     string
+	domain     string
+	outbound   string
 }
 
 // WrapWithTiming wraps a connection for TLS handshake timing.
@@ -89,10 +89,10 @@ func (c *TimingConn) recordTLS() {
 		return
 	}
 	mc.RecordTLS(TLSRecord{
-		Remote:     c.remoteAddr,
-		ConnID:     c.connID,
-		Domain:     c.domain,
-		Outbound:   c.outbound,
-		LatencyUs:  tlsUs,
+		Remote:    c.remoteAddr,
+		ConnID:    c.connID,
+		Domain:    c.domain,
+		Outbound:  c.outbound,
+		LatencyUs: tlsUs,
 	})
 }

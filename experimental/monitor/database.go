@@ -20,18 +20,21 @@ type dbEvent struct {
 
 // Database wraps SQLite with async batch writing.
 type Database struct {
-	db            *sql.DB
-	writeCh       chan dbEvent
-	done          chan struct{}
-	stopCh        chan struct{}
-	pruneSignal   chan struct{}
-	closed        atomic.Bool
-	dropped       atomic.Int64
-	batchSize     int
-	flushInterval time.Duration
-	limits        Limits
-	dbPath        string
-	wg            sync.WaitGroup
+	db          *sql.DB
+	writeCh     chan dbEvent
+	done        chan struct{}
+	stopCh      chan struct{}
+	pruneSignal chan struct{}
+	closed      atomic.Bool
+	dropped     atomic.Int64
+	// upsertDisabled 在建唯一索引失败时置位（只写协程读，启动时设置一次），
+	// 此时丢弃依赖 ON CONFLICT(conn_id) 的事件而不是崩进程。
+	upsertDisabled bool
+	batchSize      int
+	flushInterval  time.Duration
+	limits         Limits
+	dbPath         string
+	wg             sync.WaitGroup
 }
 
 // NewDatabase opens (or creates) the SQLite database and starts the async
@@ -89,8 +92,17 @@ func NewDatabaseWithLimits(path string, limits Limits) (*Database, error) {
 	fmt.Printf("[monitor] db limits: size cap %s, dns rows %d, conn rows %d, retention %d day(s)\n",
 		formatBytes(limits.MaxSizeBytes), limits.MaxDNSRows, limits.MaxConnRows, limits.RetentionDays)
 
-	// Ensure UNIQUE index for per-connection upsert — key is conn_id
-	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_conn_id ON connection_records(conn_id)")
+	// Ensure UNIQUE index for per-connection upsert — key is conn_id.
+	// 旧版本写的库可能已经有重复 conn_id（那时还没有唯一索引），先按 conn_id
+	// 去重只留最新一行，否则建索引失败 → 下面 ON CONFLICT(conn_id) 的语句
+	// prepare 不出语句（返回 nil）→ 写入协程空指针崩溃。
+	if _, err := db.Exec("DELETE FROM connection_records WHERE id NOT IN (SELECT MAX(id) FROM connection_records GROUP BY conn_id)"); err != nil {
+		fmt.Printf("[monitor] dedup connection_records failed: %v\n", err)
+	}
+	if _, err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_conn_id ON connection_records(conn_id)"); err != nil {
+		fmt.Printf("[monitor] create unique index failed: %v (per-connection upsert disabled)\n", err)
+		d.upsertDisabled = true
+	}
 
 	d.wg.Add(1)
 	go d.writer()
@@ -183,6 +195,23 @@ func (d *Database) writer() {
 			}
 		case <-ticker.C:
 			flush()
+		case <-d.stopCh:
+			// 退出前把缓冲区里剩下的事件写完，别丢尾批（writeCh 不会关闭，
+			// 见 Close：关闭它会让并发写入 panic）。
+		drain:
+			for {
+				select {
+				case e := <-d.writeCh:
+					batch = append(batch, e)
+					if len(batch) >= d.batchSize {
+						flush()
+					}
+				default:
+					break drain
+				}
+			}
+			flush()
+			return
 		}
 	}
 }
@@ -231,10 +260,18 @@ func (d *Database) flushBatch(batch []dbEvent) {
 	for _, e := range batch {
 		switch e.Kind {
 		case "dns":
+			if stmtDNS == nil {
+				d.dropped.Add(1)
+				continue
+			}
 			r := e.Data.(*DNSRecord)
 			answersJSON, _ := json.Marshal(r.Answers)
 			stmtDNS.Exec(r.Timestamp, r.Domain, r.QType, r.Transport, r.LatencyUs, r.Status, string(answersJSON), r.TTL, boolToInt(r.IsRejected))
 		case "connection":
+			if stmtConn == nil {
+				d.dropped.Add(1)
+				continue
+			}
 			r := e.Data.(*ConnectionRecord)
 			stmtConn.Exec(
 				r.ID, r.Host, r.Domain, r.DestIP, r.DestPort, r.Rule, r.Outbound,
@@ -244,15 +281,31 @@ func (d *Database) flushBatch(batch []dbEvent) {
 				r.Error,
 			)
 		case "connection_closed":
+			if stmtClosed == nil {
+				d.dropped.Add(1)
+				continue
+			}
 			r := e.Data.(*ConnectionRecord)
 			stmtClosed.Exec(r.EndTime, r.DurationMs, r.UploadBytes, r.DownloadBytes, r.ID)
 		case "connection_closed_by_dest":
+			if stmtClosedDst == nil {
+				d.dropped.Add(1)
+				continue
+			}
 			destKey := e.Data.(string)
 			stmtClosedDst.Exec(time.Now().UnixMilli(), 0, destKey)
 		case "connection_meta":
+			if stmtMeta == nil {
+				d.dropped.Add(1)
+				continue
+			}
 			meta := e.Data.(map[string]string)
 			stmtMeta.Exec(meta["host"], meta["outbound"], meta["conn_id"])
 		case "connection_latency":
+			if stmtLat == nil {
+				d.dropped.Add(1)
+				continue
+			}
 			r := e.Data.(map[string]interface{})
 			pp, _ := r["process_path"].(string)
 			errStr, _ := r["error"].(string)
@@ -269,14 +322,19 @@ func (d *Database) flushBatch(batch []dbEvent) {
 				host = COALESCE(NULLIF(excluded.host, ''), connection_records.host),
 				domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain),
 				process_path = COALESCE(NULLIF(excluded.process_path, ''), connection_records.process_path)`
-			stmtTraffic, _ := tx.Prepare(upsertTraffic)
+			stmtTraffic, err := tx.Prepare(upsertTraffic)
+			if err != nil {
+				// 没有唯一索引时这里会失败（ON CONFLICT 匹配不到约束）。
+				d.dropped.Add(int64(len(*records)))
+				continue
+			}
 			now := time.Now().UnixMilli()
 			for _, tr := range *records {
 				connID := tr.ConnID
-					if connID == "" {
-						connID = fmt.Sprintf("%s@%d", tr.Host, now)
-					}
-					stmtTraffic.Exec(connID, tr.DestIP, tr.Upload, tr.Download, tr.Outbound, tr.Host, tr.Domain, now, tr.ProcessPath)
+				if connID == "" {
+					connID = fmt.Sprintf("%s@%d", tr.Host, now)
+				}
+				stmtTraffic.Exec(connID, tr.DestIP, tr.Upload, tr.Download, tr.Outbound, tr.Host, tr.Domain, now, tr.ProcessPath)
 			}
 			stmtTraffic.Close()
 		}
@@ -300,50 +358,44 @@ func boolToInt(b bool) int {
 
 // ---- Non-blocking writes (hot-path) ----
 
-func (d *Database) WriteDNS(r *DNSRecord) {
+// send 入队一个事件。Close 之后一律丢弃：writeCh 永不关闭，所以不会出现
+// “send on closed channel” 崩溃（Close 与热路径写入是并发关系）。
+func (d *Database) send(ev dbEvent) {
+	if d.closed.Load() {
+		d.dropped.Add(1)
+		return
+	}
 	select {
-	case d.writeCh <- dbEvent{Kind: "dns", Data: r}:
+	case d.writeCh <- ev:
 	default:
 		d.dropped.Add(1)
 	}
+}
+
+func (d *Database) WriteDNS(r *DNSRecord) {
+	d.send(dbEvent{Kind: "dns", Data: r})
 }
 
 func (d *Database) WriteConnection(r *ConnectionRecord) {
-	select {
-	case d.writeCh <- dbEvent{Kind: "connection", Data: r}:
-	default:
-		d.dropped.Add(1)
-	}
+	d.send(dbEvent{Kind: "connection", Data: r})
 }
 
 func (d *Database) WriteConnectionClosed(r *ConnectionRecord) {
-	select {
-	case d.writeCh <- dbEvent{Kind: "connection_closed", Data: r}:
-	default:
-		d.dropped.Add(1)
-	}
+	d.send(dbEvent{Kind: "connection_closed", Data: r})
 }
 
 func (d *Database) WriteConnectionClosedByDest(destKey string) {
 	if destKey == "" {
 		return
 	}
-	select {
-	case d.writeCh <- dbEvent{Kind: "connection_closed_by_dest", Data: destKey}:
-	default:
-		d.dropped.Add(1)
-	}
+	d.send(dbEvent{Kind: "connection_closed_by_dest", Data: destKey})
 }
 
 func (d *Database) UpdateConnectionMeta(connID, host, outbound string) {
 	if connID == "" || (host == "" && outbound == "") {
 		return
 	}
-	select {
-	case d.writeCh <- dbEvent{Kind: "connection_meta", Data: map[string]string{"conn_id": connID, "host": host, "outbound": outbound}}:
-	default:
-		d.dropped.Add(1)
-	}
+	d.send(dbEvent{Kind: "connection_meta", Data: map[string]string{"conn_id": connID, "host": host, "outbound": outbound}})
 }
 
 func (d *Database) WriteConnectionMeta(connID, host, outbound string) {
@@ -354,11 +406,10 @@ func (d *Database) WriteLatency(connID, destIP, domain, outbound string, tcpLate
 	if connID == "" || (tcpLatencyUs == 0 && tlsLatencyUs == 0) {
 		return
 	}
-	select {
-	case d.writeCh <- dbEvent{Kind: "connection_latency", Data: map[string]interface{}{"conn_id": connID, "dest_ip": destIP, "domain": domain, "outbound": outbound, "tcp": tcpLatencyUs, "tls": tlsLatencyUs, "start_time": time.Now().UnixMilli(), "process_path": processPath, "error": errStr}}:
-	default:
-		d.dropped.Add(1)
+	if d.upsertDisabled {
+		return
 	}
+	d.send(dbEvent{Kind: "connection_latency", Data: map[string]interface{}{"conn_id": connID, "dest_ip": destIP, "domain": domain, "outbound": outbound, "tcp": tcpLatencyUs, "tls": tlsLatencyUs, "start_time": time.Now().UnixMilli(), "process_path": processPath, "error": errStr}})
 }
 
 // DroppedRecords returns the count of events dropped due to full buffer.
@@ -405,11 +456,11 @@ func (d *Database) QueryConnections(since int64, limit int) ([]ConnectionRecord,
 	for rows.Next() {
 		var r ConnectionRecord
 		var (
-			dnsLatVal  interface{}
-			tlsVerVal  interface{}
-			tlsCipVal  interface{}
-			endTimeVal interface{}
-			durMsVal   interface{}
+			dnsLatVal   interface{}
+			tlsVerVal   interface{}
+			tlsCipVal   interface{}
+			endTimeVal  interface{}
+			durMsVal    interface{}
 			procPathVal interface{}
 		)
 		if err := rows.Scan(&r.ID, &r.Host, &r.Domain, &r.DestIP, &r.DestPort, &r.Rule, &r.Outbound, &r.TCPLatencyUs, &r.TLSLatencyUs, &dnsLatVal, &tlsVerVal, &tlsCipVal, &r.UploadBytes, &r.DownloadBytes, &r.StartTime, &endTimeVal, &durMsVal, &r.Closed, &procPathVal, &r.Error); err != nil {
@@ -501,8 +552,10 @@ func (d *Database) Close() error {
 	if d.closed.Swap(true) {
 		return nil // already closed
 	}
+	// 注意：不关闭 writeCh。热路径（DNS/dial goroutine）随时可能写，
+	// 关闭它会让并发的 send 变成 “send on closed channel” panic；
+	// 写入协程靠 stopCh 退出，并在退出前把缓冲区排空。
 	close(d.stopCh)
-	close(d.writeCh)
 	d.wg.Wait()
 	close(d.done)
 	return d.db.Close()

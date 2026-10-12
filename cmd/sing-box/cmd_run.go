@@ -231,6 +231,11 @@ func run() error {
 			go closeMonitor(closeCtx)
 			err = instance.Close()
 			closed()
+			// 关闭监控（SQLite 写入协程 + 库句柄）：重载会重建 collector，
+			// 不关旧的每次 SIGHUP 都会多留一套。
+			if closeErr := monitor.Close(); closeErr != nil {
+				log.Warn("monitor: close failed: ", closeErr)
+			}
 			if osSignal != syscall.SIGHUP {
 				if err != nil {
 					log.Error(E.Cause(err, "sing-box did not closed properly"))

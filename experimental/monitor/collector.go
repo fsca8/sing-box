@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 )
 
 type Collector struct {
@@ -14,10 +15,20 @@ type Collector struct {
 	connBuf *RingBuffer[ConnectionRecord]
 	db      *Database
 	connMap map[string]*ConnectionRecord // remote addr → pending connection
-	eventCB func(string)                 // callback to push JSON to Android
+	// connOrder 记录 connMap 的插入顺序，用于按 maxConnMapEntries 淘汰最旧的条目：
+	// connMap 是"连接建立→关闭"之间的匹配表，关闭链路目前不保证被调用，
+	// 不设上限会在长期运行的网关上无界增长。
+	connOrder []string
+	// eventCB 用 atomic 存：热路径（DNS/dial goroutine）读，Kotlin 侧随时可设。
+	eventCB atomic.Pointer[func(string)] // callback to push JSON to Android
 }
 
-var globalCollector *Collector
+// globalCollector 用 atomic 存指针：Get() 在数据面热路径调用，
+// 与 NewCollectorWithLimits 的写入是并发关系。
+var globalCollector atomic.Pointer[Collector]
+
+// maxConnMapEntries 内存中待匹配连接表的上限（超出按插入顺序淘汰最旧的一批）。
+const maxConnMapEntries = 4096
 
 // NewCollector creates the collector with the default growth caps
 // (100 MB / 200k DNS rows / 100k connection rows / 7 days).
@@ -42,27 +53,57 @@ func NewCollectorWithLimits(dbPath string, limits Limits) (*Collector, error) {
 		db:      db,
 		connMap: make(map[string]*ConnectionRecord),
 	}
-	globalCollector = c
+	// 重载时替换全局 collector：先把旧的关掉，避免泄漏库句柄与写入协程。
+	if old := globalCollector.Swap(c); old != nil {
+		_ = old.Close()
+	}
 	return c, nil
 }
 
 func Get() *Collector {
-	return globalCollector
+	return globalCollector.Load()
+}
+
+// Close 关闭全局 collector（进程退出/配置重载前调用），并清空全局指针。
+// 不调用它的话：SQLite 写入协程与连接池会一直留着，重载还会再开一个库句柄。
+func Close() error {
+	collector := globalCollector.Swap(nil)
+	if collector == nil {
+		return nil
+	}
+	return collector.Close()
+}
+
+// putConnLocked 写入 connMap 并维持上限，调用者必须已持有写锁。
+func (c *Collector) putConnLocked(key string, conn *ConnectionRecord) {
+	if _, exists := c.connMap[key]; !exists {
+		c.connOrder = append(c.connOrder, key)
+	}
+	c.connMap[key] = conn
+	for len(c.connOrder) > maxConnMapEntries {
+		delete(c.connMap, c.connOrder[0])
+		c.connOrder = c.connOrder[1:]
+	}
+	// connOrder 反复切片后底层数组会一直挂着，积到一定量就搬一次家。
+	if cap(c.connOrder) > 4*maxConnMapEntries && len(c.connOrder) < 2*maxConnMapEntries {
+		c.connOrder = append([]string(nil), c.connOrder...)
+	}
 }
 
 func (c *Collector) SetEventCallback(cb func(string)) {
-	c.eventCB = cb
+	c.eventCB.Store(&cb)
 }
 
 func (c *Collector) pushJSON(v any) {
-	if c.eventCB == nil {
+	cb := c.eventCB.Load()
+	if cb == nil {
 		return
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		return
 	}
-	c.eventCB(string(b))
+	(*cb)(string(b))
 }
 
 // ---- DNS ----
@@ -118,7 +159,7 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 		if r.ProcessPath != "" {
 			conn.ProcessPath = r.ProcessPath
 		}
-		c.connMap[key] = conn
+		c.putConnLocked(key, conn)
 	} else {
 		conn.TCPLatencyUs = r.LatencyUs
 		if r.Domain != "" {
@@ -195,7 +236,7 @@ func (c *Collector) RecordTLS(r TLSRecord) {
 		if r.ProcessPath != "" {
 			conn.ProcessPath = r.ProcessPath
 		}
-		c.connMap[key] = conn
+		c.putConnLocked(key, conn)
 		if c.db != nil {
 			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs, r.ProcessPath, r.Error)
 			c.db.WriteConnectionMeta(key, r.ServerName, "")
@@ -246,7 +287,7 @@ func (c *Collector) RecordConnection(r ConnectionRecord) {
 	}
 	// No TCP hook entry yet — create new
 	r.ID = key
-	c.connMap[key] = &r
+	c.putConnLocked(key, &r)
 	c.connBuf.Push(r)
 	c.mu.Unlock()
 
@@ -309,10 +350,10 @@ func (c *Collector) CloseConnByDest(destKey string) {
 		for _, conn := range c.connMap {
 			if conn.Host == destKey || (conn.Host == "" && conn.DestIP == destKey) {
 				conn.Closed = true
-					now := nowMs()
-					conn.EndTime = &now
-					dur := now - conn.StartTime
-					conn.DurationMs = &dur
+				now := nowMs()
+				conn.EndTime = &now
+				dur := now - conn.StartTime
+				conn.DurationMs = &dur
 				if c.db != nil {
 					c.db.WriteConnectionClosed(conn)
 				}
