@@ -108,7 +108,7 @@ LD_VERSION="-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}'"
 # displayed "Netbird: <tag> (<commit>)" stays verifiable.
 if [ "$WITH_NETBIRD" = true ]; then
     # netbird 仓库定位: 环境变量优先; 否则只在 sing-box 仓库上一层目录查找
-    # (仓库约定平级放在同一父目录下, 如 <仓库父目录>/{sing-box,netbird})。
+    # (仓库约定平级放在同一父目录下, 即 <父目录>/{sing-box,netbird})。
     # 上一层找不到时报错, 提示放到上一层或拉取到上一层。
     if [ -z "${NETBIRD_DIR:-}" ]; then
         NETBIRD_DIR=""

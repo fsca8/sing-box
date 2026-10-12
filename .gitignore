@@ -32,5 +32,5 @@ go.work.sum
 singbox.log
 *.exe~
 
-# Hermes memory 锁文件 (瞬态, 不入库)
-.hermes/memory/*.lock
+# Hermes agent 工作文件 (项目 memory/skill) —— 放本机文档仓库, 不入库
+.hermes/
