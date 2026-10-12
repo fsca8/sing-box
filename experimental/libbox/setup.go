@@ -2,6 +2,7 @@ package libbox
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -112,13 +113,33 @@ func ReloadSetupOptions(options *SetupOptions) {
 	}
 }
 
-func Setup(options *SetupOptions) error {
+func Setup(options *SetupOptions) (err error) {
+	defer recoverError(&err)
 	applySetupOptions(options)
+	writeMarker("Setup ENTERED")
 	os.MkdirAll(sWorkingPath, 0o777)
 	os.MkdirAll(sTempPath, 0o777)
-	err := redirectStderr(filepath.Join(sWorkingPath, "CrashReport-"+sCrashReportSource+".log"))
+	// ensure logs directory exists for writeMarker
+	_ = os.MkdirAll(filepath.Join(sBasePath, "logs"), 0o755)
+	err = redirectStderr(filepath.Join(sWorkingPath, "CrashReport-"+sCrashReportSource+".log"))
 	savePlatformSnapshot()
 	return err
+}
+
+// writeMarker appends a timestamped line to the Go-side marker file.
+// The Kotlin side can read it for combined diagnostic view.
+func writeMarker(msg string) {
+	if sBasePath == "" {
+		return
+	}
+	p := filepath.Join(sBasePath, "logs", "go_markers.txt")
+	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[go-marker] %s\n", msg)
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "[%s] [go] %s\n", time.Now().Format("15:04:05.000"), msg)
 }
 
 func SetLocale(localeID string) error {
@@ -130,6 +151,49 @@ func SetLocale(localeID string) error {
 
 func Version() string {
 	return C.Version
+}
+
+// SingBoxCommit returns the VCS revision (12 chars) of the sing-box build,
+// or "" when no build info is embedded (e.g. -buildvcs=false).
+func SingBoxCommit() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			rev := setting.Value
+			if len(rev) > 12 {
+				rev = rev[:12]
+			}
+			return rev
+		}
+	}
+	return ""
+}
+
+// singBoxBuildTime is the real build time (RFC3339) injected via ldflags
+// -X (see dev.sh / rebuild-libbox.sh). When empty, SingBoxBuildTime falls
+// back to the VCS commit time embedded by Go.
+var singBoxBuildTime = ""
+
+// SingBoxBuildTime returns the actual build time (RFC3339) when injected
+// at build time; otherwise the VCS commit time of the sing-box build, or
+// "" when no build info is embedded.
+func SingBoxBuildTime() string {
+	if singBoxBuildTime != "" {
+		return singBoxBuildTime
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.time" {
+			return setting.Value
+		}
+	}
+	return ""
 }
 
 func GoVersion() string {

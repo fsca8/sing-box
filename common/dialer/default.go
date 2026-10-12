@@ -12,6 +12,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/listener"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/service/powerreport"
 	"github.com/sagernet/sing/common"
@@ -139,6 +140,19 @@ func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDial
 		dialer.Control = control.Append(dialer.Control, markFunc)
 		listener.Control = control.Append(listener.Control, markFunc)
 	}
+
+	// On Android, always auto-detect interface control (protect) even without auto_detect_interface,
+	// otherwise all sockets go through the TUN and create a loop.
+	// This is needed because Android's SELinux blocks /proc/net/ reading which
+	// the normal AutoDetectInterfaceFunc depends on.
+	if C.IsAndroid && networkManager != nil {
+		protectFunc := networkManager.ProtectFunc()
+		if protectFunc != nil {
+			dialer.Control = control.Append(dialer.Control, protectFunc)
+			listener.Control = control.Append(listener.Control, protectFunc)
+		}
+	}
+
 	if options.ReuseAddr {
 		listener.Control = control.Append(listener.Control, control.ReuseAddr())
 	}
@@ -273,6 +287,41 @@ func (d *DefaultDialer) DialContext(ctx context.Context, network string, address
 	} else if address.IsDomain() {
 		return nil, E.New("domain not resolved")
 	}
+
+	start := time.Now()
+	conn, err := d.dialContextInner(ctx, network, address)
+
+	if mc := monitor.Get(); mc != nil && !monitor.ShouldSkipMonitor(ctx) {
+		dialMeta := monitor.DialMetaFromContext(ctx)
+		// Only record application connections (with DialMeta), skip DNS/infrastructure connections
+		if dialMeta != nil && dialMeta.ConnID != "" {
+			if err == nil && conn != nil {
+				mc.RecordTCP(monitor.TCPRecord{
+					Remote:    address.String(),
+					ConnID:    dialMeta.ConnID,
+					Domain:    dialMeta.TargetDomain,
+					Outbound:  dialMeta.OutboundTag,
+					LatencyUs: time.Since(start).Microseconds(),
+					ProcessPath: dialMeta.ProcessPath,
+				})
+			} else if err != nil {
+				mc.RecordTCP(monitor.TCPRecord{
+					Remote:    address.String(),
+					ConnID:    dialMeta.ConnID,
+					Domain:    dialMeta.TargetDomain,
+					Outbound:  dialMeta.OutboundTag,
+					LatencyUs: time.Since(start).Microseconds(),
+					Error:     err.Error(),
+					ProcessPath: dialMeta.ProcessPath,
+				})
+			}
+		}
+	}
+
+	return conn, err
+}
+
+func (d *DefaultDialer) dialContextInner(ctx context.Context, network string, address M.Socksaddr) (net.Conn, error) {
 	if d.networkStrategy == nil {
 		conn, err := listener.ListenNetworkNamespace[net.Conn](ctx, d.netns, func() (net.Conn, error) {
 			switch N.NetworkName(network) {

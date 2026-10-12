@@ -3,6 +3,7 @@ package libbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -51,7 +52,8 @@ type CommandServerHandler interface {
 	ConnectSSHAgent() (int32, error)
 }
 
-func NewCommandServer(handler CommandServerHandler, platformInterface PlatformInterface) (*CommandServer, error) {
+func NewCommandServer(handler CommandServerHandler, platformInterface PlatformInterface) (server *CommandServer, err error) {
+	defer recoverError(&err)
 	ctx := baseContext(platformInterface)
 	powerManager := powerreport.NewManager()
 	service.MustRegister[*powerreport.Manager](ctx, powerManager)
@@ -61,7 +63,7 @@ func NewCommandServer(handler CommandServerHandler, platformInterface PlatformIn
 		powerManager: powerManager,
 	}
 	service.MustRegister[adapter.PlatformInterface](ctx, platformWrapper)
-	server := &CommandServer{
+	server = &CommandServer{
 		ctx:               ctx,
 		handler:           handler,
 		platformInterface: platformInterface,
@@ -137,10 +139,10 @@ func streamAuthInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServe
 	return handler(srv, ss)
 }
 
-func (s *CommandServer) Start() error {
+func (s *CommandServer) Start() (err error) {
+	defer recoverError(&err)
 	var (
 		listener net.Listener
-		err      error
 	)
 	if sCommandServerListenPort == 0 {
 		sockPath := filepath.Join(sBasePath, "command.sock")
@@ -176,6 +178,7 @@ func (s *CommandServer) Start() error {
 		}
 	}
 	s.listener = listener
+	writeMarker("CommandServer listener created OK")
 	serverOptions := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unaryAuthInterceptor, daemon.UnaryLocaleInterceptor),
 		grpc.ChainStreamInterceptor(streamAuthInterceptor, daemon.StreamLocaleInterceptor),
@@ -192,6 +195,11 @@ func (s *CommandServer) Start() error {
 }
 
 func (s *CommandServer) Close() {
+	defer func() {
+		if r := recover(); r != nil {
+			writeMarker(fmt.Sprintf("Close panic: %v", r))
+		}
+	}()
 	if s.grpcServer != nil {
 		s.grpcServer.Stop()
 	}
@@ -207,31 +215,48 @@ type OverrideOptions struct {
 	ExcludePackage StringIterator
 }
 
-func (s *CommandServer) StartOrReloadService(configContent string, options *OverrideOptions) error {
+func (s *CommandServer) StartOrReloadService(configContent string, options *OverrideOptions) (err error) {
+	defer recoverError(&err)
+	writeMarker("StartOrReloadService: begin, config length=" + strconv.Itoa(len(configContent)))
 	saveConfigSnapshot(configContent)
 	if s.powerManager.Recorder() != nil {
 		copyConfigSnapshot(filepath.Join(sWorkingPath, powerreport.DraftDirectoryName))
 	}
-	err := s.StartedService.StartOrReloadService(s.ctx, configContent, &daemon.OverrideOptions{
+	writeMarker("StartOrReloadService: config saved, calling StartOrReloadService")
+	writeMarker("StartOrReloadService config: " + configContent)
+	err = s.StartedService.StartOrReloadService(s.ctx, configContent, &daemon.OverrideOptions{
 		AutoRedirect:   options.AutoRedirect,
 		IncludePackage: iteratorToArray(options.IncludePackage),
 		ExcludePackage: iteratorToArray(options.ExcludePackage),
 	})
 	if err != nil {
+		writeMarker("StartOrReloadService FAILED: " + err.Error())
 		return E.Cause(err, "start or reload service")
 	}
+	writeMarker("StartOrReloadService: OK")
 	return nil
 }
 
-func (s *CommandServer) CloseService() error {
+func (s *CommandServer) CloseService() (err error) {
+	defer recoverError(&err)
 	return s.StartedService.CloseService()
 }
 
 func (s *CommandServer) WriteMessage(level int32, message string) {
+	defer func() {
+		if r := recover(); r != nil {
+			writeMarker(fmt.Sprintf("WriteMessage panic: %v", r))
+		}
+	}()
 	s.StartedService.WriteMessage(log.Level(level), message)
 }
 
 func (s *CommandServer) SetError(message string) {
+	defer func() {
+		if r := recover(); r != nil {
+			writeMarker(fmt.Sprintf("SetError panic: %v", r))
+		}
+	}()
 	s.StartedService.SetError(E.New(message))
 }
 
