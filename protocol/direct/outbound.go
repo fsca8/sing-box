@@ -11,6 +11,7 @@ import (
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/dialer"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-tun"
@@ -164,7 +165,27 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	case N.NetworkUDP:
 		h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	}
-	return h.dialer.DialContext(ctx, network, destination)
+	conn, err := h.dialer.DialContext(ctx, network, destination)
+	if err != nil {
+		return nil, err
+	}
+	if network == N.NetworkTCP {
+		conn = h.wrapTimingConn(ctx, conn)
+	}
+	return conn, nil
+}
+
+// wrapTimingConn wraps a TCP connection with TimingConn for direct outbound TLS
+// measurement. NOTE: the recorded "TLS" latency here is actually the app's
+// first-write→first-read interval (≈1 RTT, may be plain HTTP), NOT a full TLS
+// handshake — see TimingConn docs in experimental/monitor/timingconn.go.
+func (h *Outbound) wrapTimingConn(ctx context.Context, conn net.Conn) net.Conn {
+	if mc := monitor.Get(); mc != nil {
+		if dialMeta := monitor.DialMetaFromContext(ctx); dialMeta != nil && dialMeta.ConnID != "" {
+			conn = monitor.WrapWithTiming(conn, dialMeta.ConnID, dialMeta.TargetDomain, dialMeta.OutboundTag)
+		}
+	}
+	return conn
 }
 
 func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
@@ -223,7 +244,14 @@ func (h *Outbound) DialParallel(ctx context.Context, network string, destination
 	case N.NetworkUDP:
 		h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	}
-	return dialer.DialParallelNetwork(ctx, h.dialer, network, destination, destinationAddresses, len(destinationAddresses) > 0 && destinationAddresses[0].Is6(), nil, nil, nil, h.fallbackDelay)
+	conn, err := dialer.DialParallelNetwork(ctx, h.dialer, network, destination, destinationAddresses, len(destinationAddresses) > 0 && destinationAddresses[0].Is6(), nil, nil, nil, h.fallbackDelay)
+	if err != nil {
+		return nil, err
+	}
+	if network == N.NetworkTCP {
+		conn = h.wrapTimingConn(ctx, conn)
+	}
+	return conn, nil
 }
 
 func (h *Outbound) DialParallelNetwork(ctx context.Context, network string, destination M.Socksaddr, destinationAddresses []netip.Addr, networkStrategy *C.NetworkStrategy, networkType []C.InterfaceType, fallbackNetworkType []C.InterfaceType, fallbackDelay time.Duration) (net.Conn, error) {
@@ -240,7 +268,14 @@ func (h *Outbound) DialParallelNetwork(ctx context.Context, network string, dest
 	case N.NetworkUDP:
 		h.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	}
-	return dialer.DialParallelNetwork(ctx, h.dialer, network, destination, destinationAddresses, len(destinationAddresses) > 0 && destinationAddresses[0].Is6(), networkStrategy, networkType, fallbackNetworkType, fallbackDelay)
+	conn, err := dialer.DialParallelNetwork(ctx, h.dialer, network, destination, destinationAddresses, len(destinationAddresses) > 0 && destinationAddresses[0].Is6(), networkStrategy, networkType, fallbackNetworkType, fallbackDelay)
+	if err != nil {
+		return nil, err
+	}
+	if network == N.NetworkTCP {
+		conn = h.wrapTimingConn(ctx, conn)
+	}
+	return conn, nil
 }
 
 func (h *Outbound) ListenSerialNetworkPacket(ctx context.Context, destination M.Socksaddr, destinationAddresses []netip.Addr, networkStrategy *C.NetworkStrategy, networkType []C.InterfaceType, fallbackNetworkType []C.InterfaceType, fallbackDelay time.Duration) (net.PacketConn, netip.Addr, error) {

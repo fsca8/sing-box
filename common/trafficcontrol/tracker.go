@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
@@ -26,6 +27,7 @@ type TrackerMetadata struct {
 	Rule         adapter.Rule
 	Outbound     string
 	OutboundType string
+	ConnID       string // monitor connection ID, shared with dialer hooks
 }
 
 type Tracker interface {
@@ -38,7 +40,7 @@ func (m *Manager) RoutedConnection(ctx context.Context, conn net.Conn, metadata 
 	download := new(atomic.Int64)
 	tracker := &connTracker{
 		ExtendedConn: bufio.NewInt64CounterConn(conn, []*atomic.Int64{upload}, []*atomic.Int64{download}),
-		metadata:     m.newTrackerMetadata(metadata, matchedRule, matchOutbound, upload, download),
+		metadata:     m.newTrackerMetadata(ctx, metadata, matchedRule, matchOutbound, upload, download),
 		manager:      m,
 	}
 	m.join(tracker)
@@ -50,7 +52,7 @@ func (m *Manager) RoutedPacketConnection(ctx context.Context, conn N.PacketConn,
 	download := new(atomic.Int64)
 	tracker := &packetConnTracker{
 		PacketConn: bufio.NewInt64CounterPacketConn(conn, []*atomic.Int64{upload}, nil, []*atomic.Int64{download}, nil),
-		metadata:   m.newTrackerMetadata(metadata, matchedRule, matchOutbound, upload, download),
+		metadata:   m.newTrackerMetadata(ctx, metadata, matchedRule, matchOutbound, upload, download),
 		manager:    m,
 	}
 	m.join(tracker)
@@ -59,19 +61,24 @@ func (m *Manager) RoutedPacketConnection(ctx context.Context, conn N.PacketConn,
 
 func (m *Manager) RoutedFlow(ctx context.Context, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) tun.FlowTracker {
 	return &flowTracker{
-		metadata: m.newTrackerMetadata(metadata, matchedRule, matchOutbound, new(atomic.Int64), new(atomic.Int64)),
+		metadata: m.newTrackerMetadata(ctx, metadata, matchedRule, matchOutbound, new(atomic.Int64), new(atomic.Int64)),
 		manager:  m,
 	}
 }
 
-func (m *Manager) newTrackerMetadata(metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound, upload *atomic.Int64, download *atomic.Int64) TrackerMetadata {
+func (m *Manager) newTrackerMetadata(ctx context.Context, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound, upload *atomic.Int64, download *atomic.Int64) TrackerMetadata {
 	id, _ := uuid.NewV4()
 	var (
 		chain        []string
 		next         string
 		outbound     string
 		outboundType string
+		connID       string
 	)
+	// Extract monitor ConnID from context (set by router before outbound dial)
+	if dm := monitor.DialMetaFromContext(ctx); dm != nil {
+		connID = dm.ConnID
+	}
 	if matchOutbound != nil {
 		next = matchOutbound.Tag()
 	} else {
@@ -101,6 +108,7 @@ func (m *Manager) newTrackerMetadata(metadata adapter.InboundContext, matchedRul
 		Rule:         matchedRule,
 		Outbound:     outbound,
 		OutboundType: outboundType,
+		ConnID:       connID,
 	}
 }
 

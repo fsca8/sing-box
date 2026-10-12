@@ -3,14 +3,17 @@ package route
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/sniff"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing-box/log"
 	R "github.com/sagernet/sing-box/route/rule"
 	"github.com/sagernet/sing-mux"
@@ -167,6 +170,30 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 		metadata.RouteRule = selectedRule.String()
 	}
 	metadata.RouteOutbound = selectedOutbound.Tag()
+	// Inject monitor metadata BEFORE trackers so ConnID flows to traffic tracking
+	connIDDomain := metadata.Domain
+	if connIDDomain == "" {
+		connIDDomain = metadata.Destination.String()
+	}
+	// Extract process path for process-level tracking.
+	// Android searchers yield package names, not paths — fall back like the
+	// Clash API JSON (AndroidPackageNames[0]), then user id.
+	processPath := ""
+	if metadata.ProcessInfo != nil {
+		processPath = metadata.ProcessInfo.ProcessPath
+		if processPath == "" && len(metadata.ProcessInfo.AndroidPackageNames) > 0 {
+			processPath = metadata.ProcessInfo.AndroidPackageNames[0]
+		}
+		if processPath == "" && metadata.ProcessInfo.UserId != -1 {
+			processPath = strconv.FormatInt(int64(metadata.ProcessInfo.UserId), 10)
+		}
+	}
+	ctx = monitor.ContextWithDialMeta(ctx, &monitor.DialMeta{
+		ConnID:       fmt.Sprintf("%s-%d", connIDDomain, time.Now().UnixNano()),
+		TargetDomain: metadata.Domain,
+		OutboundTag:  selectedOutbound.Tag(),
+		ProcessPath:  processPath,
+	})
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
 	}
@@ -299,6 +326,30 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 		metadata.RouteRule = selectedRule.String()
 	}
 	metadata.RouteOutbound = selectedOutbound.Tag()
+	// Inject monitor metadata BEFORE trackers so ConnID flows to traffic tracking
+	connIDDomain := metadata.Domain
+	if connIDDomain == "" {
+		connIDDomain = metadata.Destination.String()
+	}
+	// Extract process path for process-level tracking.
+	// Android searchers yield package names, not paths — fall back like the
+	// Clash API JSON (AndroidPackageNames[0]), then user id.
+	processPath := ""
+	if metadata.ProcessInfo != nil {
+		processPath = metadata.ProcessInfo.ProcessPath
+		if processPath == "" && len(metadata.ProcessInfo.AndroidPackageNames) > 0 {
+			processPath = metadata.ProcessInfo.AndroidPackageNames[0]
+		}
+		if processPath == "" && metadata.ProcessInfo.UserId != -1 {
+			processPath = strconv.FormatInt(int64(metadata.ProcessInfo.UserId), 10)
+		}
+	}
+	ctx = monitor.ContextWithDialMeta(ctx, &monitor.DialMeta{
+		ConnID:       fmt.Sprintf("%s-%d", connIDDomain, time.Now().UnixNano()),
+		TargetDomain: metadata.Domain,
+		OutboundTag:  selectedOutbound.Tag(),
+		ProcessPath:  processPath,
+	})
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedPacketConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/compatible"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/experimental/monitor"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
@@ -746,7 +747,31 @@ func stripDNSPadding(response *dns.Msg) {
 }
 
 func (c *Client) exchangeToTransport(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg) (*dns.Msg, error) {
+	// Strip DialMeta from context so DoH transport connections don't get tracked as application connections
+	ctx = monitor.ContextWithSkipMonitor(ctx)
+	start := time.Now()
 	response, err := transport.Exchange(ctx, message)
+
+	if mc := monitor.Get(); mc != nil && len(message.Question) > 0 {
+		q := message.Question[0]
+		answers := make([]string, 0)
+		status := "ERROR"
+		if err == nil && response != nil {
+			status = dns.RcodeToString[response.Rcode]
+			for _, rr := range response.Answer {
+				answers = append(answers, rr.String())
+			}
+		}
+		mc.RecordDNS(monitor.DNSRecord{
+			Domain:    FqdnToDomain(q.Name),
+			QType:     dns.Type(q.Qtype).String(),
+			Transport: transport.Tag(),
+			LatencyUs: time.Since(start).Microseconds(),
+			Status:    status,
+			Answers:   answers,
+		})
+	}
+
 	if err == nil {
 		stripDNSPadding(response)
 		return response, nil
@@ -759,7 +784,30 @@ func (c *Client) exchangeToTransport(ctx context.Context, transport adapter.DNST
 }
 
 func (c *Client) exchangeToTransportAsync(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, callback func(response *dns.Msg, err error)) {
+	// Strip DialMeta from context so DoH transport connections don't get tracked as application connections
+	ctx = monitor.ContextWithSkipMonitor(ctx)
+	start := time.Now()
 	transport.ExchangeAsync(ctx, message, func(response *dns.Msg, err error) {
+		if mc := monitor.Get(); mc != nil && len(message.Question) > 0 {
+			q := message.Question[0]
+			answers := make([]string, 0)
+			status := "ERROR"
+			if err == nil && response != nil {
+				status = dns.RcodeToString[response.Rcode]
+				for _, rr := range response.Answer {
+					answers = append(answers, rr.String())
+				}
+			}
+			mc.RecordDNS(monitor.DNSRecord{
+				Domain:    FqdnToDomain(q.Name),
+				QType:     dns.Type(q.Qtype).String(),
+				Transport: transport.Tag(),
+				LatencyUs: time.Since(start).Microseconds(),
+				Status:    status,
+				Answers:   answers,
+			})
+		}
+
 		if err == nil {
 			stripDNSPadding(response)
 			callback(response, nil)
