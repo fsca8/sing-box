@@ -19,5 +19,18 @@
 /config.d/
 /venv/
 CLAUDE.md
-AGENTS.md
 /.claude/
+
+# Build artifacts
+/*.dll
+/sing-box-*.exe
+
+# Go workspace (local paths, do not commit)
+go.work
+go.work.sum
+*.exe
+singbox.log
+*.exe~
+
+# Hermes agent 工作文件 (项目 memory/skill) —— 放本机文档仓库, 不入库
+.hermes/

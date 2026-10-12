@@ -1,0 +1,8 @@
+# 上游继承历史：本仓库是 SagerNet/sing-box 的 fork。上游镜像分支与 tag 有几百条，
+# 上游自带的内容不算本机信息，也不该改（改了历史就与上游分叉，没法继续合并上游）。
+#
+# ④ 只检查“只被我方这几条 ref 引入的对象” —— glob 同时命中本地分支名与克隆里的
+# 远端跟踪名（refs/heads/my_custom* 与 refs/remotes/origin/my_custom*）。
+# 末尾的 * 是为了让基线分支（my_custom_v<上游 tag>）也被扫到，别改成精确名。
+*/my_custom*
+*/sing-netbird
