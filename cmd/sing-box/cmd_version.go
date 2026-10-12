@@ -34,6 +34,7 @@ func printVersion(cmd *cobra.Command, args []string) {
 
 	var tags string
 	var revision string
+	var buildTime string
 
 	debugInfo, loaded := debug.ReadBuildInfo()
 	if loaded {
@@ -43,6 +44,8 @@ func printVersion(cmd *cobra.Command, args []string) {
 				tags = setting.Value
 			case "vcs.revision":
 				revision = setting.Value
+			case "vcs.time":
+				buildTime = setting.Value
 			}
 		}
 	}
@@ -53,6 +56,10 @@ func printVersion(cmd *cobra.Command, args []string) {
 	if revision != "" {
 		version += "Revision: " + revision + "\n"
 	}
+	if buildTime != "" {
+		version += "BuildTime: " + buildTime + "\n"
+	}
+	version += netbirdVersionLine()
 
 	if C.CGO_ENABLED {
 		version += "CGO: enabled\n"

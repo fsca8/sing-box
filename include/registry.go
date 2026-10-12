@@ -103,6 +103,7 @@ func OutboundRegistry() *outbound.Registry {
 
 	registerQUICOutbounds(registry)
 	registerStubForRemovedOutbounds(registry)
+	registerNetbirdOutbound(registry)
 
 	return registry
 }
@@ -136,6 +137,7 @@ func DNSTransportRegistry() *dns.TransportRegistry {
 	registerTailscaleTransport(registry)
 	registerOpenConnectDNSTransport(registry)
 	registerOpenVPNDNSTransport(registry)
+	registerNetbirdDNSTransport(registry)
 
 	return registry
 }
