@@ -227,7 +227,9 @@ func (w *platformInterfaceWrapper) FindConnectionOwner(request *adapter.FindConn
 		return nil, err
 	}
 	if result == nil {
-		return &adapter.ConnectionOwner{}, nil
+		// UserId 用 -1 表示"未知"：上层（user_id 规则、process searcher）
+		// 只把 -1 当未知，零值 0 会被解析成 root，导致 user_id 规则误命中。
+		return &adapter.ConnectionOwner{UserId: -1}, nil
 	}
 	return &adapter.ConnectionOwner{
 		UserId:              result.UserId,

@@ -4,12 +4,16 @@ package libbox
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/sagernet/sing-box/experimental/netbird_integration"
 )
 
+// netbirdEngineMu 保护 netbirdEngine：Kotlin 线程（start/stop）与 Go 侧回调
+// 可能并发，读改写不加锁会漏 Shutdown 或漏判旧引擎。
 var (
-	netbirdEngine *netbird_integration.Engine
+	netbirdEngineMu sync.Mutex
+	netbirdEngine   *netbird_integration.Engine
 )
 
 // NetbirdStartAll takes netbird config JSON and sing-box config JSON,
@@ -20,17 +24,21 @@ var (
 // If credentials are missing or incomplete, returns singBoxConfig unchanged.
 func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified string, retErr error) {
 	defer recoverError(&retErr)
+	// panic 路径的返回值要给宿主一个可用的配置，别让它拿空串去落盘。
+	modified = singBoxConfig
 	writeMarker("NetbirdStartAll ENTERED")
 	writeMarker("NetbirdStartAll: nbConfig length=" + strconv.Itoa(len(netbirdConfigJSON)))
 
 	// 同一进程内重复启动(Android stop→start、异常路径二次 start): 必须先
 	// 停掉旧引擎。否则旧引擎仍持有同一 WireGuard key / mgmt 连接 / 状态文件,
 	// 新引擎再拉一个同身份实例并存互踩 → netbird 隧道不可用(stop→start 必现)。
+	netbirdEngineMu.Lock()
 	if netbirdEngine != nil {
 		writeMarker("NetbirdStartAll: stopping previous engine (stop→start)")
 		netbirdEngine.Shutdown()
 		netbirdEngine = nil
 	}
+	netbirdEngineMu.Unlock()
 
 	cfg, err := netbird_integration.ParseConfig(netbirdConfigJSON)
 	if err != nil {
@@ -62,7 +70,9 @@ func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified s
 	}
 
 	if result.Engine != nil {
+		netbirdEngineMu.Lock()
 		netbirdEngine = result.Engine
+		netbirdEngineMu.Unlock()
 		// 异步启动: 引擎实例已创建, 但连接/启动发生在后台 goroutine —
 		// 这里不代表启动成功(无网络时引擎会在后台重试/失败)。真实状态
 		// 看 nb-engine.log 的 "engine started"/"engine failed to start"。
@@ -84,7 +94,10 @@ func NetbirdStartAll(netbirdConfigJSON string, singBoxConfig string) (modified s
 // embed client keeps its WireGuard key / management connection / state
 // files alive, and the next start pulls up a second engine with the same
 // identity, which fights the first one (stop→start leaves netbird dead).
-func NetbirdStop() {
+func NetbirdStop() (retErr error) {
+	defer recoverError(&retErr)
+	netbirdEngineMu.Lock()
+	defer netbirdEngineMu.Unlock()
 	writeMarker("NetbirdStop ENTERED")
 	if netbirdEngine != nil {
 		netbirdEngine.Shutdown()
@@ -93,6 +106,7 @@ func NetbirdStop() {
 	} else {
 		writeMarker("NetbirdStop: no engine running")
 	}
+	return nil
 }
 
 // NetbirdBridgeTCP starts an overlay→local TCP bridge on the given port.

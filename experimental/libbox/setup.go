@@ -126,13 +126,20 @@ func Setup(options *SetupOptions) (err error) {
 	return err
 }
 
+// markerFileMaxSize 限制 Go 侧诊断文件的体积：超过就把旧内容挪到 .1（只留一代）。
+const markerFileMaxSize = 1 << 20
+
 // writeMarker appends a timestamped line to the Go-side marker file.
 // The Kotlin side can read it for combined diagnostic view.
+// 只写短消息，不要把配置正文/凭据写进来（该文件会被用户导出上报）。
 func writeMarker(msg string) {
 	if sBasePath == "" {
 		return
 	}
 	p := filepath.Join(sBasePath, "logs", "go_markers.txt")
+	if info, err := os.Stat(p); err == nil && info.Size() > markerFileMaxSize {
+		_ = os.Rename(p, p+".1")
+	}
 	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[go-marker] %s\n", msg)

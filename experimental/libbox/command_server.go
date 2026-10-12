@@ -223,7 +223,7 @@ func (s *CommandServer) StartOrReloadService(configContent string, options *Over
 		copyConfigSnapshot(filepath.Join(sWorkingPath, powerreport.DraftDirectoryName))
 	}
 	writeMarker("StartOrReloadService: config saved, calling StartOrReloadService")
-	writeMarker("StartOrReloadService config: " + configContent)
+	// 不要把配置正文写进诊断文件：里面可能有服务器地址、密码、UUID。
 	err = s.StartedService.StartOrReloadService(s.ctx, configContent, &daemon.OverrideOptions{
 		AutoRedirect:   options.AutoRedirect,
 		IncludePackage: iteratorToArray(options.IncludePackage),
