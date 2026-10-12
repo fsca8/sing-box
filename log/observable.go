@@ -42,6 +42,7 @@ type pendingEntry struct {
 	message   string
 	timestamp time.Time
 }
+
 func NewDefaultFactory(
 	ctx context.Context,
 	formatter Formatter,
