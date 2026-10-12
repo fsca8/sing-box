@@ -14,7 +14,7 @@
 #   ./dev.sh <any-go-flags>           # pass custom flags
 #
 # Environment:
-#   TAGS    — build tags (default: "with_utls,with_gvisor,with_clash_api")
+#   TAGS    — build tags (default: release/DEFAULT_BUILD_TAGS_OTHERS)
 #   DEBUG   — set to 1 for debug build (default when no args)
 #   GOOS    — target OS (default: current)
 #   GOARCH  — target arch (default: current)
@@ -88,7 +88,9 @@ if [ "$TARGET_GOOS" = "windows" ]; then
 fi
 
 # ── Build tags ──────────────────────────────────────────────────────
-BASE_TAGS="${TAGS:-with_utls,with_gvisor,with_quic,with_wireguard,with_clash_api}"
+# 默认用项目自己的发布 tag 集（含 badlinkname/tfogo_checklinkname0，缺了 kTLS 会退化成
+# 报错 stub）。release/DEFAULT_BUILD_TAGS_OTHERS 是上游 v1.14.3 自带的，不新增分歧。
+BASE_TAGS="${TAGS:-$(cat release/DEFAULT_BUILD_TAGS_OTHERS)}"
 if [ "$WITH_NETBIRD" = true ]; then
     TAGS="${BASE_TAGS},with_netbird"
     OUTPUT="sing-box-netbird-${VERSION}${EXT}"
@@ -125,6 +127,15 @@ if [ "$WITH_NETBIRD" = true ]; then
             exit 1
         fi
     fi
+    # 硬校验: netbird 不在 go.mod 里（靠工作区提供），解析不了就明确报错，
+    # 别等 go build 跑到一半才失败。go.work.example 是本仓库给的模板。
+    if ! go list -tags "${BASE_TAGS},with_netbird" ./experimental/netbird_integration >/dev/null 2>&1; then
+        echo "ERROR: with_netbird 的依赖无法解析（netbird 不在 go.mod 里）" >&2
+        echo "  需要上一层有 go.work 把本仓库与 netbird 放在同一工作区:" >&2
+        echo "    cp go.work.example ../go.work   # 路径按你的目录结构调整" >&2
+        echo "  缺 go.work.sum 时执行: go work sync" >&2
+        exit 1
+    fi
     NETBIRD_VERSION="$(cd "$NETBIRD_DIR" && cat UPSTREAM_TAG 2>/dev/null | tr -d '[:space:]')"
     if [ -z "${NETBIRD_VERSION:-}" ]; then
         NETBIRD_VERSION="$(cd "$NETBIRD_DIR" && git describe --tags --exact-match 2>/dev/null || echo development)"
@@ -141,12 +152,13 @@ fi
 # time). Injected on both the binary and the libbox (Android) builds.
 BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LD_VERSION="${LD_VERSION} -X 'github.com/sagernet/sing-box/experimental/libbox.singBoxBuildTime=${BUILD_TIME}'"
+LD_VERSION="${LD_VERSION} -X 'main.singBoxBuildTime=${BUILD_TIME}'"
 
 if [ "$BUILD_MODE" = "release" ]; then
-    LDFLAGS_SHARED="${LD_VERSION} -s -w -buildid="
+    LDFLAGS_SHARED="${LD_VERSION} $(cat release/LDFLAGS) -s -w -buildid="
     echo "→ Release build: ${VERSION}"
 else
-    LDFLAGS_SHARED="${LD_VERSION}"
+    LDFLAGS_SHARED="${LD_VERSION} $(cat release/LDFLAGS)"
     echo "→ Debug build: ${VERSION}"
     echo "  (use './dev.sh release' for stripped release build)"
 fi

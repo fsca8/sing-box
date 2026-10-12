@@ -1,0 +1,26 @@
+// go.work.example — 模板：复制成 go.work（同目录）后按实际 checkout 位置调整路径。
+//
+// 为什么需要 workspace：netbird 集成（-tags with_netbird）要 import
+// github.com/netbirdio/netbird，但上游 sing-box 的 go.mod/go.sum 里没有这个
+// 依赖，而且本 fork 需要 netbird 侧的修改，所以只能把两个模块用 Go workspace
+// 拼起来构建。**不要**为它跑 `go mod tidy`（会把 netbird 当远端模块解析，拉到
+// 无法解析的伪版本），也不要提交 go.work / go.work.sum（.gitignore 已忽略）。
+//
+// 目录约定（两个模块并列，go.work 放上层或 sing-box 内都可以，改这里的 use 路径即可）：
+//
+//	<workdir>/go.work          ← 本文件复制到这里
+//	<workdir>/sing-box/        ← 本仓库
+//	<workdir>/netbird/         ← netbird fork checkout
+//
+// 只构建不带 netbird 的产物时不需要 workspace，直接在本仓库 `go build ./...`。
+go 1.25.5
+
+use (
+	./sing-box
+	./netbird
+)
+
+// netbird 的 go.mod 锁 route53 v1.5.0（配套 libdns v0.2.x），但 sing-box 的依赖树
+// 把 libdns 抬到 v1.1.1，MVS 取最大版本会让 route53 v1.5.0 编译失败（Record 结构
+// 不匹配）。v1.6.2 是配套 libdns v1.1.1 的版本。
+replace github.com/libdns/route53 => github.com/libdns/route53 v1.6.2

@@ -9,7 +9,8 @@
 #
 # 可选环境变量:
 #   TEST_DOMAIN=xxx.xxx      管理端下发的自定义域名(测试隧道内 DNS 解析, 强烈建议)
-#   TEST_IPERF_PEER=100.x.x  iperf3 对端 overlay IP(可选, 需对端已装 iperf3 -s)
+#   TEST_NETBIRD_CIDR=<net>/16 netbird overlay 网段(必填, 各家网络不同)
+#   TEST_IPERF_PEER=<ip>      iperf3 对端 overlay IP(可选, 需对端已装 iperf3 -s)
 #
 # 测试流程:
 #   1. 环境预检 + 快照(规则/服务/resolv.conf)
@@ -21,7 +22,25 @@
 # ============================================================================
 set -u
 
-TESTDIR=/tmp/sing-netbird-test
+# overlay 网段必须由调用方给出（不许把某台机器的网段写进仓库）
+CIDR="${TEST_NETBIRD_CIDR:-}"
+if [ -z "$CIDR" ]; then
+  echo "ERROR: 请设置 TEST_NETBIRD_CIDR=<overlay 网段, 如 x.y.0.0/16>" >&2
+  exit 1
+fi
+# 取该网段的倒数第二个地址作为模拟 wt0 的本地地址（netbird 的 DNS 占最后一个）
+W0_ADDR="$(python3 - "$CIDR" <<'EOF'
+import ipaddress, sys
+net = ipaddress.ip_network(sys.argv[1], strict=False)
+hosts = list(net.hosts())
+print(hosts[-2])
+EOF
+)"
+
+# 测试目录用 mktemp(700)：里面会放 netbird 私钥并以 root 执行二进制，
+# 固定路径（/tmp/xxx）会被其他用户预建/替换。
+TESTDIR="$(mktemp -d "${TMPDIR:-/tmp}/sing-netbird-test.XXXXXX")"
+chmod 700 "$TESTDIR"
 BIN=$TESTDIR/sing-netbird
 LOGDIR=$TESTDIR/log
 SB_CONFIG=$TESTDIR/sing-box-test.json
@@ -120,14 +139,14 @@ mode_b() {
   # 模拟 wt0 (若不存在)
   if ! ip link show wt0 >/dev/null 2>&1; then
     ip link add wt0 type dummy 2>&1 && info "dummy wt0 已创建"
-    ip addr add 100.121.254.26/16 dev wt0 2>/dev/null
+    ip addr add "${W0_ADDR}/16" dev wt0 2>/dev/null
     ip link set wt0 up
     DUMMY_CREATED=1
   else
     DUMMY_CREATED=0
   fi
   # 运行 harness (15s 后自动清理)
-  "$TESTDIR/test-kernel-route" 100.121.0.0/16 > "$LOGDIR/harness.log" 2>&1 &
+  "$TESTDIR/test-kernel-route" "$CIDR" > "$LOGDIR/harness.log" 2>&1 &
   HPID=$!
   sleep 4
   if ip rule show | grep -q "2000:.*lookup 10021"; then
