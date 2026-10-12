@@ -37,7 +37,7 @@ var commandRunAll = &cobra.Command{
 When --enable-netbird is true and netbird config is available:
   - netbird engine starts first
   - DNS queries route through netbird's handler chain
-  - Traffic to 100.121.0.0/16 goes through netbird tunnel
+  - Traffic to the netbird overlay CIDR goes through the netbird tunnel
 When --enable-netbird is false (default), runs sing-box only.
 
 Netbird config:
@@ -57,7 +57,10 @@ func init() {
 }
 
 func runAll() error {
-	if len(configPaths) == 0 && len(configDirectories) == 0 {
+	if len(configPaths) == 0 {
+		if len(configDirectories) > 0 {
+			return E.New("run-all needs a single config file: -c <path> (config directories are not supported)")
+		}
 		return E.New("-c config path required")
 	}
 	cleanup, err := runAllEngines(configPaths[0])
@@ -117,7 +120,8 @@ func runAllEngines(cfgPath string) (func(), error) {
 			nbEngine = startAllResult.Engine
 			if startAllResult.ModifiedConfig != nil {
 				tmpPath := cfgPath + ".nb-tmp.json"
-				if err := os.WriteFile(tmpPath, startAllResult.ModifiedConfig, 0644); err != nil {
+				// 0600：注入后的配置含 uuid/密码等凭据（原文件可能也是 0600）
+				if err := os.WriteFile(tmpPath, startAllResult.ModifiedConfig, 0o600); err != nil {
 					return nil, E.Cause(err, "write temp config")
 				}
 				defer os.Remove(tmpPath)
@@ -172,9 +176,9 @@ func runAllEngines(cfgPath string) (func(), error) {
 			log.Info("netbird kernel route removed")
 		}
 		if nbEngine != nil {
-			if err := nbEngine.Stop(); err != nil {
-				log.Error("netbird stop: ", err)
-			}
+			// Shutdown（而非 Stop）：同时关掉网络变化 watcher，否则它可能
+			// 在拆除后把刚停掉的引擎重新拉起来。
+			nbEngine.Shutdown()
 		}
 		instanceCancel()
 		log.Info("all engines stopped")

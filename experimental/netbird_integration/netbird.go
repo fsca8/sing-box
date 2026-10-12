@@ -34,7 +34,7 @@ type StartAllResult struct {
 	// never attempted (no credentials) or started successfully.
 	EngineErr string
 	// NetworkCIDR is the account overlay CIDR from the sync response
-	// (e.g. "100.121.0.0/16"), or "" when unknown. Used by kernel-TUN mode
+	// (e.g. "<net>.0.0/16"), or "" when unknown. Used by kernel-TUN mode
 	// to install the static route to wt0.
 	NetworkCIDR string
 }
@@ -146,7 +146,7 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 				networkCIDR = ExtractNetworkCIDR(resp)
 				result.NetworkCIDR = networkCIDR
 				// Compute the tunnel DNS server address from the account network
-				// (last-but-one IP of the overlay /16, e.g. 100.121.255.254:53).
+				// (last-but-one IP of the overlay /16, e.g. <net>.255.254:53).
 				// Without this, the netbird DNS transport has no reachable target.
 				// Netstack mode only: in kernel-TUN mode the DNS server binds the
 				// WG interface's own IP:53, set by SetupKernelRoute.
@@ -499,12 +499,15 @@ func (e *Engine) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := e.client.Stop(ctx); err != nil {
-		return fmt.Errorf("netbird embed stop: %w", err)
-	}
-
+	stopErr := e.client.Stop(ctx)
+	// 无论 embed 内部 Stop 成功与否，包装层状态都必须落定：Stop 超时时 embed
+	// 已经把内部 connect 置 nil，这里若继续认为 running=true，Start() 会永远
+	// 以 "netbird engine already running" 拒绝，恢复路径变成死循环。
 	e.running = false
 	e.client = nil
+	if stopErr != nil {
+		return fmt.Errorf("netbird embed stop: %w", stopErr)
+	}
 	log.Info("netbird: engine stopped")
 	return nil
 }
@@ -546,10 +549,6 @@ func (e *Engine) watchStopped() bool {
 // writeDomainsRuleSet's NOTE on DNS-referenced IP-bearing sets.
 const domainsRuleSetFile = "nb-domains.json"
 const cidrRuleSetFile = "nb-cidr.json"
-
-// defaultOverlayCIDR is the netbird default account overlay subnet, used when
-// the sync response has not arrived yet.
-const defaultOverlayCIDR = "100.121.0.0/16"
 
 // domainsRuleSetPath returns the absolute path of the custom-domain rule-set
 // file. Falls back to the OS temp dir when DataDir is unset (CLI runs).
@@ -621,14 +620,16 @@ func writeDomainsRuleSet(path string, domains []string) error {
 // writeCidrRuleSet writes the overlay CIDR to its rule-set file (route-only
 // set: the route rule {rule_set: nb-cidr, outbound: nb-out} matches it, and
 // no DNS rule references it, so the 1.14 legacy-address-filter validation
-// never sees it). Empty cidr falls back to the netbird default.
+// never sees it). 网段只能来自 netbird 同步结果（各账号不同）：拿不到时写
+// 空规则集，而不是猜一个网段 —— 猜错会让 overlay 流量被路由到错误目标。
 func writeCidrRuleSet(path string, cidr string) error {
-	if cidr == "" {
-		cidr = defaultOverlayCIDR
+	rules := []map[string]any{}
+	if cidr != "" {
+		rules = append(rules, map[string]any{"ip_cidr": []string{cidr}})
 	}
 	data, err := json.Marshal(map[string]any{
 		"version": 1,
-		"rules":   []map[string]any{{"ip_cidr": []string{cidr}}},
+		"rules":   rules,
 	})
 	if err != nil {
 		return err
@@ -660,9 +661,6 @@ func (e *Engine) writeDomainsFiles(domains []string, cidr string) error {
 // management-side changes: a different overlay network, or domain added to
 // the account DNS config, takes effect without reloading the service).
 func (e *Engine) refreshDomainsFile(domains []string, cidr string) {
-	if cidr == "" {
-		cidr = defaultOverlayCIDR
-	}
 	dSig := domainsSig(domains)
 	e.domainsMu.Lock()
 	dChanged := dSig != e.domainsSig

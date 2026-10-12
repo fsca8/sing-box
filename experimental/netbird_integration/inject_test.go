@@ -1,3 +1,5 @@
+//go:build with_netbird
+
 package netbird_integration
 
 import (
@@ -9,6 +11,8 @@ import (
 	"testing"
 )
 
+// testConfig intentionally has NO dns-direct server — injection must add one,
+// because a DNS rule referencing a missing server tag is silently skipped.
 const testConfig = `{
   "dns": {"servers": [{"tag": "main", "address": "223.5.5.5"}], "rules": [{"domain_suffix": ["example.com"], "server": "main"}]},
   "outbounds": [{"type": "direct", "tag": "direct"}, {"type": "vless", "tag": "proxy"}],
@@ -129,7 +133,7 @@ func TestInjectBypassUserspace(t *testing.T) {
 	for _, r := range route {
 		if cidrs, ok := r.(map[string]any)["ip_cidr"].([]any); ok {
 			for _, c := range cidrs {
-				if fmt.Sprint(c) == "100.121.0.0/16" {
+				if fmt.Sprint(c) == "100.99.0.0/16" {
 					t.Fatal("static overlay CIDR rule must not be injected (nb-cidr rule-set replaces it)")
 				}
 			}
@@ -156,7 +160,7 @@ func TestInjectKernelMode(t *testing.T) {
 	for _, r := range route {
 		if cidrs, ok := r.(map[string]any)["ip_cidr"].([]any); ok {
 			for _, c := range cidrs {
-				if fmt.Sprint(c) == "100.121.0.0/16" {
+				if fmt.Sprint(c) == "100.99.0.0/16" {
 					t.Fatal("kernel mode: overlay rule must not be injected")
 				}
 			}
@@ -298,7 +302,7 @@ func TestInjectStaleOverlayCleaned(t *testing.T) {
 	defer SetKernelMode(false)
 
 	cfg := `{"route": {"rules": [
-	  {"ip_cidr": ["100.121.0.0/16"], "outbound": "nb-out"},
+	  {"ip_cidr": ["100.99.0.0/16"], "outbound": "nb-out"},
 	  {"rule_set": "geosite-!cn", "outbound": "proxy"}
 	]}, "dns": {}}`
 	out, err := InjectNetbirdJSON([]byte(cfg), "", nil, "", "")
@@ -312,7 +316,7 @@ func TestInjectStaleOverlayCleaned(t *testing.T) {
 		if cidrs, ok := m["ip_cidr"].([]any); ok {
 			count++
 			for _, c := range cidrs {
-				if fmt.Sprint(c) == "100.121.0.0/16" && m["outbound"] != "nb-out" {
+				if fmt.Sprint(c) == "100.99.0.0/16" && m["outbound"] != "nb-out" {
 					t.Fatal("stale overlay rule not cleaned")
 				}
 			}
@@ -607,6 +611,45 @@ func TestInjectCustomDomainRuleSet(t *testing.T) {
 	for _, r := range dns3 {
 		if fmt.Sprint(r.(map[string]any)["rule_set"]) == customRuleSetTag {
 			t.Fatal("dns rule_set ref must not be injected when path empty")
+		}
+	}
+}
+
+// TestInjectedDNSRuleServerExists 断言注入的 DNS 规则引用的 server tag 真实
+// 存在于 dns.servers —— 引用不存在的 tag 时 dns/router.go 只记日志并跳过该
+// 规则，控制面 DNS 会静默走 dns.final（代理）。
+func TestInjectedDNSRuleServerExists(t *testing.T) {
+	for _, cfg := range []string{testConfig, `{"dns": {}, "outbounds": [], "route": {}}`} {
+		out, err := InjectNetbirdJSON([]byte(cfg), "https://nb.example.wang", nil, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(out, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		dns := parsed["dns"].(map[string]any)
+		tags := make(map[string]bool)
+		if servers, ok := dns["servers"].([]any); ok {
+			for _, srv := range servers {
+				if m, ok := srv.(map[string]any); ok {
+					tags[fmt.Sprint(m["tag"])] = true
+				}
+			}
+		}
+		rules, _ := dns["rules"].([]any)
+		if len(rules) == 0 {
+			t.Fatalf("no dns rule injected for %s", cfg)
+		}
+		for _, r := range rules {
+			m, ok := r.(map[string]any)
+			if !ok {
+				continue
+			}
+			tag := fmt.Sprint(m["server"])
+			if !tags[tag] {
+				t.Fatalf("dns rule references server %q which is not in dns.servers (silently skipped at runtime)", tag)
+			}
 		}
 	}
 }

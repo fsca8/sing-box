@@ -157,7 +157,7 @@ func (r *Router) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 			err := ruleSetStartGroup.Run(r.ctx)
 			monitor.Finish()
 			if err != nil {
-				log.Warn(E.Cause(err, "initialize rule-set: skip, continue"))
+				return err
 			}
 		}
 		if startContext != nil {

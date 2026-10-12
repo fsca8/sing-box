@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/experimental/netbird_integration"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing/common/json"
 
 	"github.com/spf13/cobra"

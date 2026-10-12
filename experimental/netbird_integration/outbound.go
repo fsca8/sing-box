@@ -24,7 +24,7 @@ func RegisterOutbound(registry *outbound.Registry) {
 var _ N.Dialer = (*Outbound)(nil)
 
 // Outbound routes traffic through netbird's netstack WireGuard tunnel.
-// Used by route rules matching 100.121.0.0/16.
+// Used by route rules matching the overlay CIDR.
 type Outbound struct {
 	outbound.Adapter
 	ctx    context.Context

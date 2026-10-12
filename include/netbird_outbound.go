@@ -7,8 +7,8 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
-	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/experimental/netbird_integration"
+	"github.com/sagernet/sing-box/log"
 )
 
 func registerNetbirdOutbound(registry *outbound.Registry) {

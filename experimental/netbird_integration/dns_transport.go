@@ -69,11 +69,13 @@ func GetDNSAddr() string {
 // ComputeDNSAddr derives the netbird DNS server address from the account's
 // overlay network CIDR. Netbird runs its DNS server on the last-but-one IP of
 // the overlay network (GetLastIPFromNetwork(network, 1) in client/net/net.go),
-// e.g. 100.121.0.0/16 → 100.121.255.254:53. Empty CIDR falls back to the
-// netbird default 100.121.0.0/16. Returns "" when the CIDR cannot be parsed.
+// e.g. an overlay /16 <net>.0.0/16 → <net>.255.254:53.
+//
+// CIDR 由 SyncResponse 的网络信息（或 peer 自身地址）推导；拿不到 CIDR 时
+// 返回 ""（没有可用 overlay 网络，猜一个网段没有意义），由调用方跳过该 DNS。
 func ComputeDNSAddr(networkCIDR string) string {
 	if networkCIDR == "" {
-		networkCIDR = "100.121.0.0/16"
+		return ""
 	}
 	prefix, err := netip.ParsePrefix(networkCIDR)
 	if err != nil || !prefix.Addr().Is4() || prefix.Bits() >= 32 {

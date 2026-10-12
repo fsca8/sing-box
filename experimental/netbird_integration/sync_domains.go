@@ -77,7 +77,7 @@ func ExtractDomainsFromSync(resp *mgmProto.SyncResponse) []string {
 }
 
 // ExtractNetworkCIDR extracts the account's IPv4 overlay subnet (e.g.
-// "100.121.0.0/16") from the netbird SyncResponse.
+// e.g. "<net>.0.0/16") from the netbird SyncResponse.
 //
 // Priority:
 //  1. NetworkMapEnvelope.full.network.net_cidr — exact prefix from the
@@ -88,7 +88,7 @@ func ExtractDomainsFromSync(resp *mgmProto.SyncResponse) []string {
 //     peer's own address is the network prefix.
 //
 // Returns "" when neither source is available (caller falls back to the
-// netbird default 100.121.0.0/16).
+// netbird overlay /16).
 func ExtractNetworkCIDR(resp *mgmProto.SyncResponse) string {
 	if resp == nil {
 		return ""

@@ -9,8 +9,8 @@ import (
 	"net/netip"
 	"testing"
 
-	mgmProto "github.com/netbirdio/netbird/shared/management/proto"
 	nbnet "github.com/netbirdio/netbird/client/net"
+	mgmProto "github.com/netbirdio/netbird/shared/management/proto"
 )
 
 func TestExtractNetworkCIDR(t *testing.T) {
@@ -31,11 +31,11 @@ func TestExtractNetworkCIDR(t *testing.T) {
 	// legacy 路径: 对端地址按 /16 掩码回退
 	resp2 := &mgmProto.SyncResponse{
 		NetworkMap: &mgmProto.NetworkMap{
-			PeerConfig: &mgmProto.PeerConfig{Address: "100.121.0.2"},
+			PeerConfig: &mgmProto.PeerConfig{Address: "100.99.0.2"},
 		},
 	}
-	if got := ExtractNetworkCIDR(resp2); got != "100.121.0.0/16" {
-		t.Fatalf("legacy path: got %q, want 100.121.0.0/16", got)
+	if got := ExtractNetworkCIDR(resp2); got != "100.99.0.0/16" {
+		t.Fatalf("legacy path: got %q, want 100.99.0.0/16", got)
 	}
 
 	// 非默认前缀的对端地址也正确掩码
@@ -60,15 +60,15 @@ func TestComputeDNSAddr(t *testing.T) {
 		cidr string
 		want string
 	}{
-		{"default /16", "", "100.121.255.254:53"},
-		{"explicit /16", "100.121.0.0/16", "100.121.255.254:53"},
+		{"empty cidr -> no dns addr (no invented network)", "", ""},
+		{"explicit /16", "100.99.0.0/16", "100.99.255.254:53"},
 		{"component cidr", "100.90.0.0/16", "100.90.255.254:53"},
 		{"legacy masked", "100.64.0.0/16", "100.64.255.254:53"},
 		{"non-default prefix", "10.0.0.0/8", "10.255.255.254:53"},
 		{"/24 network", "192.168.1.0/24", "192.168.1.254:53"},
 		{"invalid", "not-a-cidr", ""},
 		{"ipv6 rejected", "fd00::/8", ""},
-		{"/32 rejected", "100.121.0.1/32", ""},
+		{"/32 rejected", "100.99.0.1/32", ""},
 	}
 	for _, c := range cases {
 		if got := ComputeDNSAddr(c.cidr); got != c.want {

@@ -175,13 +175,13 @@ func (d *defaultDialer) dialContext(ctx context.Context, destination M.Socksaddr
 				errStr = err.Error()
 			}
 			mc.RecordTLS(monitor.TLSRecord{
-				Remote:     conn.RemoteAddr().String(),
-				ConnID:     dialMeta.ConnID,
-				Domain:     dialMeta.TargetDomain,
-				Outbound:   dialMeta.OutboundTag,
-				ServerName: serverName,
-				LatencyUs:  latency,
-				Error:      errStr,
+				Remote:      conn.RemoteAddr().String(),
+				ConnID:      dialMeta.ConnID,
+				Domain:      dialMeta.TargetDomain,
+				Outbound:    dialMeta.OutboundTag,
+				ServerName:  serverName,
+				LatencyUs:   latency,
+				Error:       errStr,
 				ProcessPath: dialMeta.ProcessPath,
 			})
 		}

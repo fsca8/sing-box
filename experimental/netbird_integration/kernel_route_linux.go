@@ -23,8 +23,6 @@ const (
 	kernelIfaceName     = "wt0"
 )
 
-var defaultNetworkCIDR = "100.121.0.0/16"
-
 // SetupKernelRoute installs the single static route that sends the netbird
 // overlay CIDR straight to the netbird kernel TUN (wt0), bypassing the
 // sing-box TUN stack (Route A). It must be called after the netbird engine
@@ -32,14 +30,12 @@ var defaultNetworkCIDR = "100.121.0.0/16"
 // (priority 2000) always precedes sing-tun's (9000).
 //
 // Returns a cleanup function that removes the route and rule.
-// networkCIDR may be "" — falls back to the netbird default 100.121.0.0/16.
+// networkCIDR 必须来自 netbird 同步结果（各账号不同）：空/非法直接报错，不
+// 用猜测的网段建路由。
 func SetupKernelRoute(networkCIDR string) (func(), error) {
 	prefix, err := netip.ParsePrefix(networkCIDR)
 	if err != nil {
-		prefix, err = netip.ParsePrefix(defaultNetworkCIDR)
-		if err != nil {
-			return nil, fmt.Errorf("netbird kernel route: invalid CIDR %q: %w", networkCIDR, err)
-		}
+		return nil, fmt.Errorf("netbird kernel route: invalid or missing overlay CIDR %q: %w", networkCIDR, err)
 	}
 	if !prefix.Addr().Is4() {
 		return nil, fmt.Errorf("netbird kernel route: IPv4 required, got %s", prefix)
@@ -58,7 +54,7 @@ func SetupKernelRoute(networkCIDR string) (func(), error) {
 	// interface's own overlay IP on port 53 (service_listener.go:
 	// testFreePort tries wgInterface.Address().IP first). Record it so the
 	// DNS transport dials the local resolver instead of the netstack-mode
-	// fake address (second-last network IP, e.g. 100.121.255.254) which
+	// fake address (second-last network IP, e.g. <net>.255.254) which
 	// would be encapsulated into the tunnel and never reach the resolver.
 	if addrs, err := netlink.AddrList(link, unix.AF_INET); err == nil {
 		for _, a := range addrs {
