@@ -14,7 +14,9 @@ import (
 //   - sing-box config injection skips the overlay route rules (kernel handles
 //     the overlay), keeping the custom-domain DNS rules and the engine bypass
 //
-// Set by StartAll() before the engine starts. Only ever true on Linux.
+// Set by StartAll() before the engine starts, and re-derived by every
+// Engine.Start() — Stop() clears it, and restarts (network change, recovery) do
+// not go through StartAll. Only ever true on Linux.
 var kernelMode bool
 
 // IsKernelMode reports whether the kernel-TUN data path is active.

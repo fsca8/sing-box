@@ -41,6 +41,16 @@ var commandNetbirdStatus = &cobra.Command{
 	Use:   "netbird-status",
 	Short: "Show netbird engine status",
 	Run: func(cmd *cobra.Command, args []string) {
+		// The engine pointer is only assigned by "netbird-run". A standalone
+		// "netbird-status" invocation therefore has no engine — the engine is
+		// process-local, so it cannot have one — and the old code dereferenced
+		// the nil pointer and died with a SIGSEGV instead of reporting that.
+		// The first line is kept identical for callers that parse it.
+		if nbEngine == nil {
+			fmt.Println("netbird: stopped")
+			fmt.Println("netbird-status only reports the engine started by this process; none was started here")
+			return
+		}
 		status := nbEngine.GetStatus()
 		if status.Running {
 			fmt.Println("netbird: running")

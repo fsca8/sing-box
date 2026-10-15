@@ -278,7 +278,17 @@ func (e *Engine) postStartSync() {
 		if err != nil {
 			log.Warn("netbird: re-sync after restart: ", err)
 		} else {
-			if !IsKernelMode() {
+			if IsKernelMode() {
+				// Kernel-TUN mode: the engine restart recreated the kernel
+				// interface, which dropped the link-bound overlay route (the
+				// rule survives, leaving an empty table) and invalidated the
+				// tunnel DNS address recorded at startup. Both have to be
+				// re-derived here — a startup snapshot is taken once, before
+				// any of these restarts, so it can never cover them.
+				if err := ReconcileKernelRoute(ExtractNetworkCIDR(resp)); err != nil {
+					log.Warn("netbird: reconcile kernel route after restart: ", err)
+				}
+			} else {
 				SetDNSAddr(ComputeDNSAddr(ExtractNetworkCIDR(resp)))
 			}
 			// 引擎恢复后的自定义域名实时注入: 重写 rule-set 文件(域名+真实
@@ -480,6 +490,13 @@ func (e *Engine) Start() error {
 	e.client = client
 	e.running = true
 	e.mu.Unlock()
+	// Re-derive the global data-path flag on every start. Stop() clears it and
+	// the network-change restart path calls Start() without going through
+	// StartAll, so without this the process silently degrades to the userspace
+	// netstack for the rest of its lifetime after the first restart (DNS target
+	// recomputed for the wrong path, kernel-route reconcile skipped, nothing in
+	// the logs).
+	SetKernelMode(kernelTun)
 	log.Info("netbird: engine started")
 	return nil
 }
@@ -691,6 +708,13 @@ func (e *Engine) refreshDomainsFile(domains []string, cidr string) {
 // refreshDomainsFromSync pulls the latest sync response and updates the
 // domains rule-set if changed. Covers domains that arrive after the initial
 // sync wait (slow first sync) and management-side domain changes.
+//
+// Nothing else lives here on purpose: the kernel-mode wiring is repaired by the
+// network monitor's 5s tick (ReconcileKernelRoute), which does not depend on a
+// sync response at all. An earlier version reconciled it here, after this
+// function's sync check — so when the sync wait timed out (exactly the case a
+// repair path exists for) the kernel route was skipped and the overlay stayed
+// unreachable for the process's whole lifetime.
 func (e *Engine) refreshDomainsFromSync() {
 	c := e.GetClient()
 	if c == nil {
@@ -707,6 +731,9 @@ func (e *Engine) refreshDomainsFromSync() {
 
 // IsRunning returns whether the engine is running.
 func (e *Engine) IsRunning() bool {
+	if e == nil {
+		return false
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.running
@@ -714,13 +741,24 @@ func (e *Engine) IsRunning() bool {
 
 // GetClient returns the underlying netbird embed client, if available.
 func (e *Engine) GetClient() *nbembed.Client {
+	if e == nil {
+		return nil
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.client
 }
 
 // GetStatus returns the current engine status.
+//
+// A nil engine reports "not running" instead of panicking: the engine is only
+// assigned when the integration actually starts (see cmd/sing-box), so every
+// other invocation legitimately has no engine and must still be able to ask
+// for its status.
 func (e *Engine) GetStatus() *Status {
+	if e == nil {
+		return &Status{Running: false}
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return &Status{Running: e.running}

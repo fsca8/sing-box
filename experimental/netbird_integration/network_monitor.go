@@ -29,6 +29,8 @@ func watchNetworkChanges(e *Engine) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	tickCount := 0
+	var kernelErr string
+	var kernelWarnAt time.Time
 	for {
 		select {
 		case <-e.stopCh:
@@ -62,6 +64,23 @@ func watchNetworkChanges(e *Engine) {
 		if changed {
 			log.Info("netbird: network change detected (interface addresses changed), restarting engine")
 			e.restartOnNetworkChange()
+		}
+		// 内核模式自愈(每 5s): wt0 由引擎创建/销毁, 重建时旧路由随接口消失而
+		// 路由规则会留下(空表); 隧道 DNS 地址也是接口自己的 IPv4。启动时的一次性
+		// 快照抓不到这些, 只能在这里补, 且必须与同步结果解耦 —— 同步失败正是需要
+		// 自愈的场景。Reconcile 内部先探测再写, 稳态下不产生任何路由表改动。
+		// 失败按“消息指纹 + 60s”限流, 避免接口尚未就绪时刷屏。
+		if IsKernelMode() {
+			if err := ReconcileKernelRoute(""); err != nil {
+				msg := err.Error()
+				if msg != kernelErr || time.Since(kernelWarnAt) > time.Minute {
+					log.Warn("netbird: reconcile kernel route: ", err)
+					kernelErr = msg
+					kernelWarnAt = time.Now()
+				}
+			} else {
+				kernelErr = ""
+			}
 		}
 		// 周期性域名刷新(每 30s): 覆盖"引擎已启动但 StartAll 的 5s
 		// sync 等待超时"与"管理端新增/移除域名"的场景。refreshDomainsFile
