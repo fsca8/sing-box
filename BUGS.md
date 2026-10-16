@@ -7,11 +7,26 @@
 （`192.0.2.0/24`、`198.51.100.0/24`、`203.0.113.0/24`、`example.com`）；本机的具体
 地址/域名/路径不写在这里。涉及具体部署值的复现步骤用 `<overlay DNS 地址>` 这类占位符。
 
+### 状态总览（先看这里）
+
+| 编号 | 一句话 | 状态 | 修复提交 |
+| --- | --- | --- | --- |
+| BUG-0001 | 内核 TUN 下本机自查 CustomZone 域名永久挂起 | ✅ 已修复 | `944b45300` |
+| BUG-0002 | `netbird-status` 空指针 panic（SIGSEGV） | ✅ 已修复 | `944b45300` |
+| BUG-0003 | overlay 路由/规则永远装不上（周期自愈被同步检查短路） | ✅ 已修复 | `944b45300` |
+| BUG-0004 | 每个失败拨号都打一条 ERROR：日志被拨号失败刷满 | 🟡 已定位、未修复 | — |
+| BUG-0005 | monitor 连接记录只记"打开"半边、字段恒为初值，且每分钟裁剪刷日志 | 🟡 已定位、未修复 | — |
+
+**状态只有三种取值**：`✅ 已修复` / `🟡 已定位、未修复` / `🔴 已知、未定位`。
+每条标题下的第一项 "状态" 写了修复提交与验证到什么程度；`grep -n "^## BUG-" BUGS.md`
+只列条目，配合本表即可判断"这个 bug 现在是什么情况"。
+
 ---
 
 ## BUG-0001 内核 TUN 模式下，本机自查 CustomZone 域名永久挂起：tunnel DNS 地址为空导致从不拨号，fallback 又递归自噬
 
-* **状态**：已定位、已修复。
+* **状态**：✅ 已修复（提交 `944b45300`）。已在 kernel-TUN 部署上验证：宿主服务启动 3.5s 内
+  装好路由，zone 内名字毫秒级返回，进程连续运行 20 小时以上无重启、无回归。
 * **组件**：`experimental/netbird_integration`（`dns_transport.go`、`kernel_route_linux.go`、`netbird.go`）。
 * **影响面**：**只影响同时担任隧道 DNS server 的那台 peer 自己**。其余 peer 拿管理端下发的
   nameserver 配置、经隧道查询该 peer 的 DNS server，路径正常。宿主上任何按 CustomZone 域名
@@ -100,7 +115,10 @@
 ### 修好后怎么验
 
 * `getent hosts <zone 内的名字>` / `dig <zone 内的名字>` 毫秒级返回**隧道的 overlay 地址**；
-  zone 内不存在的名字也毫秒级失败，不再挂起。
+  zone 内**未登记**的名字也毫秒级返回，不再挂起。
+  ⚠️ 但**不要**把"未登记的名字返回 NXDOMAIN"当成判据：netbird 下发的 CustomZone 是**通配域**，
+  它下面的任何名字都会答成同一个 overlay 地址（实测未登记名字 `NOERROR` + 该地址，1ms）。
+  判据是"**快**"（<1s，而不是 10s/60s 挂起），不是"答 NXDOMAIN"。
 * `ip route show table <内核路由表号>` 非空，且 `ip rule` 里对应 priority 的规则指向该表。
 * 宿主服务重启后（wt0 会被重建）**立刻**可解析，不需要等下一次引擎重启。
 * 引擎因网络变化自动重启后（**不**重启服务）自愈：规则与路由恢复、地址重新读取、解析继续可用。
@@ -111,7 +129,8 @@
 
 ## BUG-0002 `netbird-status` 空指针 panic（SIGSEGV）
 
-* **状态**：已修复。
+* **状态**：✅ 已修复（提交 `944b45300`）。验证：`netbird-status` 退出码 0、打印 `netbird: stopped`、
+  不再 SIGSEGV。
 * **组件**：`cmd/sing-box/cmd_netbird.go`、`experimental/netbird_integration/netbird.go`。
 * **现象**：任何一次 `netbird-status` 都会立即崩溃（SIGSEGV），拿不到任何状态输出。
 * **根因**：包级变量 `nbEngine` 只在 `runNetbird()` 里赋值，而 `commandNetbirdStatus`
@@ -131,7 +150,8 @@
 
 ## BUG-0003 内核模式下 overlay 路由/规则永远不会装上：网段只信管理面同步响应，周期自愈又被同步检查短路
 
-* **状态**：已修复。
+* **状态**：✅ 已修复（提交 `944b45300`）。验证：启动期（t=3.5s）与 5s 周期 tick 两条路径都能把
+  规则 + 路由装上，日志里带 `prefix source` 便于取证。
 * **组件**：`experimental/netbird_integration/kernel_route_linux.go`、`network_monitor.go`、`netbird.go`。
 * **影响面**：kernel-TUN（Route A）部署。后果是**整个 overlay 出口不可用**：本机到其他 peer
   （含 overlay 上的 ssh）被自己的代理 TUN 收走 → 走代理 → 不该出网的 overlay 流量出网且不通。
@@ -207,3 +227,68 @@ if IsKernelMode() { ReconcileKernelRoute(ExtractNetworkCIDR(resp)) }
   `ip route get` 显示 `dev <内核接口>`。**不要**拿本机自己的 overlay 地址当探针——那会命中
   `local` 表，永远显示 `dev lo`。
 * 重启宿主服务（内核 TUN 会被重建）后 **5s 内**恢复；外部监护不再报 `overlay=0`。
+
+---
+
+## BUG-0004 每个失败拨号都打一条 ERROR：日志文件被拨号失败刷满（已定位、未修复）
+
+* **状态**：🟡 已定位、未修复（噪声治理项）。
+* **组件**：`route/conn.go`（失败路径：`E.Cause(...)` + `m.logger.ErrorContext(ctx, err)`）。
+* **现象**：跑着 BitTorrent 客户端（`aria2c` 之类）的透明网关上，日志文件**全部内容都是失败拨号**——
+  实测某次统计：文件 221,948 行，其中 221,946 行（≈100%）是
+  `ERROR [<连接号> <耗时>] connection: open connection to <ip>:<端口> using outbound/direct[direct]:
+  dial tcp <ip>:<端口>: i/o timeout | connect: connection refused`。
+  增长约 **11–13 MB/天**；配置的 `log.max_size_mb` 到顶后文件被就地截断（实测 52.4 MB → 39.4 MB，
+  没有 `<日志名>.1` 之类的轮转文件）。
+* **根因**：连接建立失败这条路径**无条件按 ERROR 记一行**，没有去重、没有节流、没有汇总。
+  BT 客户端向 DHT / 对等端发起的连接本来大量不可达（超时 / 拒绝），于是**失败率直接等于日志量**。
+  这不是"日志级别配错了"：这些确实是 error 级事件，`log.level` 挡不住。
+* **为什么不能靠配置绕开**：失败拨号是 BT 的正常行为；改成别的出站或封端口会改变业务语义；
+  调短拨号超时只会让单位时间内的失败次数**更多**。
+* **修法方向**（未实施）：
+  1. 在这条错误路径加**按「出站 + 错误类别 + 目的端口」聚合的节流器**：每分钟前 N 条原样打印，
+     其余折叠成一条 `... (同类失败 M 次，示例: ...)`。既保留"出了什么事"，又把每秒十几行压到
+     每分钟个位数行。
+  2. 节流状态挂 `Router` 实例上（**不要**用包级全局，避免多实例互相污染），退出/汇总时 flush 一条。
+  3. 需要"一条不漏"的用途走 monitor 的事件回调或库表，不要靠日志承担计数职责。
+* **验证方式**：复现失败拨号风暴后，日志里同类错误不超过节流上限，且汇总行里的计数与实际失败次数一致。
+
+---
+
+## BUG-0005 monitor 连接记录只记了"打开"半边：`dest_port` 恒为 0、字节与关闭状态永不落库，还每分钟裁剪刷日志（已定位、未修复）
+
+* **状态**：🟡 已定位、未修复（噪声治理项）。
+* **组件**：`experimental/monitor`（`collector.go`、`database.go`、`maintenance.go`），涉及
+  `route/conn.go`、`experimental/clashapi/connections.go` 的接线。
+* **现象**（实测某网关上 10 万行 `connection_records`）：
+
+  | 观测 | 结果 |
+  | --- | --- |
+  | `dest_port = 0` | **全部**行 |
+  | `upload_bytes + download_bytes = 0` | **全部**行 |
+  | `closed = 1` | **0** 行（`end_time_ms` / `duration_ms` 同理） |
+  | 其中本机 BT 客户端的失败拨号 | 99.5%（其余是别的本机进程） |
+  | journal 里的 `[monitor] pruned ... records` | **每 60 秒一条**（因为行数一直顶在上限） |
+
+* **根因**：三个互相独立的缺陷叠在一起：
+  1. **`dest_port` 没有任何写入点**。表结构、`INSERT`、`SELECT` 里都有这一列，但全仓库没有一处
+     给 `ConnectionRecord.DestPort` 赋值；端口其实躺在 `dest_ip` 里（值形如 `192.0.2.1:51413`），
+     从来没被拆出来。
+  2. **"关闭"与"流量"两条路都没接通**：`Collector.CloseConnection` / `CloseConnByDest` 在全仓库
+     **没有调用者**（后者的注释写着 "called from route/conn.go"，但那里并没有调用它）；
+     `SyncTraffic` 只在启用了 `clash_api` 的部署里才会被驱动（`clashapi/connections.go`）。
+     于是真实部署上 `closed` / 字节数 / 结束时间**永远是初值**。
+  3. **裁剪噪音**：行数上限（默认 DNS 20 万 / 连接 10 万）被"失败且零流量"这类无信息量的行顶满后，
+     维护任务每分钟删一批，并往 stdout 打一条 `[monitor] pruned ...`（进 journal）。
+* **影响**：连接表几乎**不能用来排查真实连接**（没端口、没流量、没时长、没关闭状态）；
+  库长期贴着上限，每分钟一次 DELETE + 自愈式收缩；journal 被这条固定噪音占住（实测一天 684 条）。
+* **修法方向**（未实施，按性价比排序）：
+  1. **接通关闭链路**（正本清源）：在连接结束处调用 `CloseConnection(connID, duration, up, down)`，
+     或让 `CloseConnByDest` 真正被调用；两条路都要求 key 与创建时一致（`ConnID`，退化到 `dest_ip`）。
+  2. **拆出 `dest_port`**：写入时从目的地址解析端口，`dest_ip` 只放 IP（避免一列两种含义）。
+  3. **不给"失败且零流量"的连接建行**：这类事件改成按「出站 + 错误类别」计数，需要明细时靠事件回调；
+     否则一台 BT 客户端就能把上限顶满。
+  4. **裁剪日志降噪**：`pruned` 只在实际发生显著收缩（或按小时汇总）时打一条，而不是每次跑都打。
+* **验证方式**：正常跑一段时间后 `select count(*) from connection_records where dest_port = 0`
+  应为 0 或只占极少数；`closed = 1` 且字节数非零的行应占多数；journal 里 `pruned` 明显减少；
+  库大小稳定、不再每分钟抖动。

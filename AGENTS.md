@@ -23,7 +23,7 @@ netbird 集成等自有功能。给 agent / 新协作者的最小须知，细节
   go.mod/go.sum 里（上游没有该依赖，且本 fork 需要 netbird 侧修改）。见
   `go.work.example`（复制为 `go.work`，按 checkout 位置改 `use` 路径）。缺 workspace 时
   构建会报 `no required module provides package github.com/netbirdio/netbird/...`。
-* 工作区 `go` 行取两个模块 requirement 的较大者：netbird 0.80.0/0.81.x 要求 `go >= 1.26.0`
+* 工作区 `go` 行取两个模块 requirement 的较大者：netbird 0.80.0 要求 `go >= 1.26.0`
   （其 go.mod 还把工具链钉在 go1.26.7），本仓库是 1.25.5 → `go.work` 写 `go 1.26.0`。
   `dev.sh` 在 netbird 构建时固定 `GOTOOLCHAIN`（默认 go1.26.8）到该线以上。
 * ⚠️ **不要跑 `go mod tidy`**：它把 netbird 当远端模块解析，会拉到无法解析的伪版本
@@ -46,4 +46,7 @@ netbird 集成等自有功能。给 agent / 新协作者的最小须知，细节
   panic。改 `.proto` 后必须重新生成 `*.pb.go` / `*_grpc.pb.go` 并提交生成物。
 * 文档分工：`AGENTS.md`（本文，精简、写"该怎么做"）、`README.md`（项目概况）、
   `DESIGN.md`（方案设计）、`BUGS.md`（问题定位与修复记录）。
+* **`BUGS.md` 顶部有「状态总览」表**：先看它判断某个问题是不是已经修过、修在哪个提交，别从头读全文。
+  当前状态：BUG-0001 / 0002 / 0003 已修复（`944b45300`）；BUG-0004（失败拨号把日志刷满）与
+  BUG-0005（monitor 连接记录字段恒为初值 + 每分钟裁剪刷日志）已定位、未修复。
 * 提交前跑机器级泄漏/产物自检脚本（在本机文档仓库的 `_machine/` 下），红了不要提交。
