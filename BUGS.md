@@ -15,22 +15,23 @@
 | BUG-0002 | `netbird-status` 空指针 panic（SIGSEGV） | ✅ 已修复 | `944b45300` |
 | BUG-0003 | overlay 路由/规则永远装不上（周期自愈被同步检查短路） | ✅ 已修复 | `944b45300` |
 | BUG-0004 | 每个失败拨号都打一条 ERROR：日志被拨号失败刷满 | ✅ 已修复 | `96d8e1b5f` `527c79e6f` |
-| BUG-0005 | monitor 连接记录只记"打开"半边、字段恒为初值，且每分钟裁剪刷日志 | 🟡 已定位、未修复 | — |
+| BUG-0005 | monitor 连接记录只记"打开"半边、字段恒为初值，且每分钟裁剪刷日志 | ✅ 已修复 | `8d6dc2971` |
 
 **状态只有三种取值**：`✅ 已修复` / `🟡 已定位、未修复` / `🔴 已知、未定位`。
 每条标题下的第一项 "状态" 写了修复提交与验证到什么程度；`grep -n "^## BUG-" BUGS.md`
 只列条目，配合本表即可判断"这个 bug 现在是什么情况"。
 
-> ⚠️ **验证基线**：上面三条"已修复"是在**基于 netbird 0.76.3 的 release 构建**上验证的
-> （`v1.14.3-a5b7013d6-20261015`；该二进制 `version` 打印 `Netbird: v0.76.3 (b999e306d)`）。
+> ⚠️ **验证基线**：BUG-0001/0002/0003 三条"已修复"是在**基于 netbird 0.76.3 的 release 构建**上
+> 验证的（`v1.14.3-a5b7013d6-20261015`；该二进制 `version` 打印 `Netbird: v0.76.3 (b999e306d)`）。
 > 之后仓库的 netbird 依赖先升到 0.80.0、再升到 **0.81.1**（v0.80.0→v0.81.1 之间有 100+ 个
 > 上游提交）。换到新基线后要重新复核两条最贴上游的路径：BUG-0001 的"隧道 DNS 地址从哪来"、
 > BUG-0003 的"overlay 网段从哪来" —— 两者都吃 netbird 侧下发的数据结构。
 >
-> BUG-0004 是**纯 sing-box 侧**改动（日志出口折叠），不依赖 netbird 版本：它已用**新产物在
-> 本机做了一次端到端演示**（本地 SOCKS 入口 + `direct` 出站 + 40 次必然失败的连接，不需要 root、
-> 不碰线上服务），但**尚未上机**——下一次 release 构建会同时带上它与 netbird 0.81.1，
-> 届时按上面两条重新复核。
+> BUG-0004 与 BUG-0005 都是**纯 sing-box 侧**改动（前者日志出口折叠，后者 monitor 的记账与降噪），
+> 与 netbird 版本无关。BUG-0004 已用**新产物在本机做了一次端到端演示**（本地 SOCKS 入口 +
+> `direct` 出站 + 40 次必然失败的连接，不需要 root、不碰线上服务）；BUG-0005 有单测覆盖，并配了
+> 只读的核对脚本。两者**都尚未上机**——下一次 release 构建会同时带上它们与 netbird 0.81.1，
+> 届时按上面两条重新复核，并确认新产物上 BUG-0004 的折叠与 BUG-0005 的字段写入确实生效。
 
 ---
 
@@ -305,40 +306,78 @@ if IsKernelMode() { ReconcileKernelRoute(ExtractNetworkCIDR(resp)) }
 
 ---
 
-## BUG-0005 monitor 连接记录只记了"打开"半边：`dest_port` 恒为 0、字节与关闭状态永不落库，还每分钟裁剪刷日志（已定位、未修复）
+## BUG-0005 monitor 连接记录只记"打开"半边：`dest_port` 恒为 0、字节与关闭状态永不落库，还每分钟裁剪刷日志（已修复）
 
-* **状态**：🟡 已定位、未修复（噪声治理项）。
-* **组件**：`experimental/monitor`（`collector.go`、`database.go`、`maintenance.go`），涉及
-  `route/conn.go`、`experimental/clashapi/connections.go` 的接线。
-* **现象**（实测某网关上 10 万行 `connection_records`）：
+* **状态**：✅ 已修复（提交 `8d6dc2971`）。单测覆盖；上机核对脚本已就位，**尚未在线上产物上复核**。
+* **组件**：`experimental/monitor`（`collector.go`、`database.go`、`maintenance.go`、`limits.go`），
+  接线在 `cmd/sing-box/cmd_run.go`、`option/experimental.go`。
+* **现象**（实测某网关上库贴着上限时的统计）：
 
   | 观测 | 结果 |
   | --- | --- |
+  | `connection_records` 行数 | 100,662（上限 100,000，每分钟都在删旧补新） |
   | `dest_port = 0` | **全部**行 |
-  | `upload_bytes + download_bytes = 0` | **全部**行 |
-  | `closed = 1` | **0** 行（`end_time_ms` / `duration_ms` 同理） |
-  | 其中本机 BT 客户端的失败拨号 | 99.5%（其余是别的本机进程） |
-  | journal 里的 `[monitor] pruned ... records` | **每 60 秒一条**（因为行数一直顶在上限） |
+  | `dest_ip` 里带 `:端口` | **全部**行（端口一直混在地址列里） |
+  | `closed = 1` / `end_time_ms` 非空 | **0** 行 |
+  | `upload_bytes + download_bytes > 0` | **0** 行 |
+  | `error` 非空（失败行） | 79,273（78.8%） |
+  | 写入速率 | 约 731 行/分钟 ≈ 4.4 万行/小时 |
+  | `dns_records` 行数 | 200,001（上限 200,000） |
+  | 其中重复的失败行 | **197,201**：都是 `transport=nb` + `status=ERROR`、`qtype=A`、无应答、`latency_us ≈ 10,001,000`，集中在 2.3 小时内（约 24 行/秒），而且只是 4 个域名各约 4.9 万次重复 |
+  | 重复最多的目的地 | 一个固定的代理出口（占连接表 19.8%） |
+  | journal 里 `[monitor] pruned ...` | 每 60 秒一条（100 分钟 120 条，一天数百条） |
 
-* **根因**：三个互相独立的缺陷叠在一起：
-  1. **`dest_port` 没有任何写入点**。表结构、`INSERT`、`SELECT` 里都有这一列，但全仓库没有一处
-     给 `ConnectionRecord.DestPort` 赋值；端口其实躺在 `dest_ip` 里（值形如 `192.0.2.1:51413`），
-     从来没被拆出来。
-  2. **"关闭"与"流量"两条路都没接通**：`Collector.CloseConnection` / `CloseConnByDest` 在全仓库
-     **没有调用者**（后者的注释写着 "called from route/conn.go"，但那里并没有调用它）；
-     `SyncTraffic` 只在启用了 `clash_api` 的部署里才会被驱动（`clashapi/connections.go`）。
-     于是真实部署上 `closed` / 字节数 / 结束时间**永远是初值**。
-  3. **裁剪噪音**：行数上限（默认 DNS 20 万 / 连接 10 万）被"失败且零流量"这类无信息量的行顶满后，
-     维护任务每分钟删一批，并往 stdout 打一条 `[monitor] pruned ...`（进 journal）。
+  这一批数据本身也是 BUG-0001 的余波：那 197,201 条 DNS 失败全部落在同一次
+  "隧道 DNS 地址为空 → 退回公共 DNS → 又被自己的 TUN 劫持"的故障窗口里
+  （单条 `latency_us ≈ 10,001,000`，即 10 秒挂起）。故障修掉后这类行不再新增，
+  但已经写进库的重复行与"每分钟裁剪"的噪音仍在。
+
+* **根因**：四个互相独立的缺陷叠在一起：
+  1. **`dest_port` 没有任何写入点**。表结构、`INSERT`、`SELECT` 里都有这一列，
+     但全仓库没有一处给 `ConnectionRecord.DestPort` 赋值；端口其实躺在 `dest_ip` 里
+     （值形如 `192.0.2.1:51413`），从来没被拆出来。
+  2. **"关闭"与"流量"两条路都没接通**：`Collector.CloseConnection` / `CloseConnByDest`
+     在全仓库**没有调用者**（后者的注释写着 "called from route/conn.go"，但那里并没有调用它）；
+     字节数只有 `SyncTraffic` 会写，而它只在启用了 `clash_api` 的部署里被驱动。
+     于是真实部署上 `closed` / 结束时间 / 时长 / 字节数**永远是初值**。
+  3. **失败记录不做合并**：一次上游故障会对同一个目的地反复重试、对同一个域名反复解析，
+     每条都建一行。连接表被"失败且零流量"的行顶满（实测 78.8% 是失败行），
+     DNS 表更极端（200,001 行里 197,201 行是同一小撮失败的四次方重复）。
+  4. **裁剪日志没节流**：行数顶到上限后，维护任务每分钟删一批并往 stdout 打一行（进 journal），
+     一天数百行，而且没说清是被行数上限还是体积上限触发的。
 * **影响**：连接表几乎**不能用来排查真实连接**（没端口、没流量、没时长、没关闭状态）；
-  库长期贴着上限，每分钟一次 DELETE + 自愈式收缩；journal 被这条固定噪音占住（实测一天 684 条）。
-* **修法方向**（未实施，按性价比排序）：
-  1. **接通关闭链路**（正本清源）：在连接结束处调用 `CloseConnection(connID, duration, up, down)`，
-     或让 `CloseConnByDest` 真正被调用；两条路都要求 key 与创建时一致（`ConnID`，退化到 `dest_ip`）。
-  2. **拆出 `dest_port`**：写入时从目的地址解析端口，`dest_ip` 只放 IP（避免一列两种含义）。
-  3. **不给"失败且零流量"的连接建行**：这类事件改成按「出站 + 错误类别」计数，需要明细时靠事件回调；
-     否则一台 BT 客户端就能把上限顶满。
-  4. **裁剪日志降噪**：`pruned` 只在实际发生显著收缩（或按小时汇总）时打一条，而不是每次跑都打。
-* **验证方式**：正常跑一段时间后 `select count(*) from connection_records where dest_port = 0`
-  应为 0 或只占极少数；`closed = 1` 且字节数非零的行应占多数；journal 里 `pruned` 明显减少；
-  库大小稳定、不再每分钟抖动。
+  库长期贴着上限，每分钟一次 DELETE + 自愈式收缩；journal 被这条固定噪音占住。
+* **修复**（提交 `8d6dc2971`）：
+  1. **拆出 `dest_port`**：新增 `splitHostPort` / `connDest`（基于 `net.SplitHostPort`），写连接行时
+     把 `host:port` 拆成 `dest_ip` + `dest_port`；`upsertConnLat` 一并写入端口，冲突分支用
+     `COALESCE(NULLIF(excluded.dest_port, 0), connection_records.dest_port)`，
+     免得把已经写好的端口覆盖回 0。查询侧本来就 `SELECT dest_port` 并 `Scan(&DestPort)`，
+     所以 API 立刻就有真端口，下游不用改。
+  2. **失败即"已结束"**：`WriteLatency` 记录到失败（`error` 非空）时直接按结束落库——
+     `closed = 1`、`end_time_ms = start_time_ms + max(tcp, tls) / 1000`、`duration_ms` 同值；
+     成功的行保持 `closed = 0`、`end_time_ms` 为 NULL，等真正关闭时再补。
+     冲突分支里 `closed` 取 `MAX`，时间与时长用 `COALESCE(MAX(a, b), a, b)`——
+     ⚠️ SQLite 里 `max(NULL, x)` 是 NULL，裸 `MAX` 会把已有值抹成 NULL。
+  3. **失败记录按窗口合并**：`Collector` 增加有界去重表（`failDedupe`，上限 4096 条，FIFO 淘汰），
+     连接侧键为 `remote|outbound`，DNS 侧键为 `domain|qtype|status`，
+     窗口内重复的失败只让第一条落库。**只抑制数据库写入**：环形缓冲与实时事件推送照旧，
+     界面上的实时流水不受影响；成功的连接永远落库。窗口默认 60 秒，`< 0` 关闭。
+  4. **裁剪日志节流并讲清原因**：裁剪日志最多每 10 分钟一行，被压掉的轮数与行数累计到下一行里
+     （`suppressed N passes, M records`），并写明真正触发的上限（行数上限 / 体积上限）；
+     checkpoint 失败仍然每次都报，不参与节流。
+  5. **新增两个开关**：`experimental.monitor.fail_dedupe_sec`（默认 60）、
+     `maintenance_log_sec`（默认 600）；`0` 表示用默认，**负值表示关闭**
+     （前者=关掉去重，后者=不节流）。默认值直接生效，**不需要改配置**；
+     `LimitsFrom` 会把 0 回填成默认值，所以只写这两个键不会影响
+     `max_size_mb` / `max_dns_rows` / `max_conn_rows` / `retention_days`。
+* **没做什么**：没有去接 `CloseConnByDest` 那条断线（那要在上游 `route/conn.go` 的热路径上加调用），
+  也没有把 `SyncTraffic` 从 `clash_api` 上解耦——真正的"关闭 + 流量"记账留待另开一项。
+* **修好后怎么验**：
+  * 单测：`go test -count=1 ./experimental/monitor/...`，覆盖端口拆分、失败即关闭
+    （成功的行不许被标记成关闭）、连接与 DNS 两侧的窗口去重与关闭开关、
+    裁剪日志节流与被压掉的计数，以及 `LimitsFrom` 的 0 / 负值语义。
+  * **上机后**（配套只读脚本，不需要 root）：按服务启动时刻切出新旧两个队列，检查新行里
+    `dest_port = 0` 与 `dest_ip` 带端口均为 0、失败行 `closed = 1` 且有结束时间、
+    每分钟写入量明显下降、journal 里 `monitor` 行从约 1 条/分钟降到约 1 条/10 分钟、
+    DNS 表里同一个 `(domain, qtype)` 的 ERROR 不再成片。
+  * 预期：库不再每分钟抖动（体积稳定），连接表里只剩有信息量的行。
