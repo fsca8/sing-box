@@ -21,6 +21,12 @@
 每条标题下的第一项 "状态" 写了修复提交与验证到什么程度；`grep -n "^## BUG-" BUGS.md`
 只列条目，配合本表即可判断"这个 bug 现在是什么情况"。
 
+> ⚠️ **验证基线**：上面三条"已修复"是在**基于 netbird 0.76.3 的 release 构建**上验证的
+> （`v1.14.3-a5b7013d6-20261015`；该二进制 `version` 打印 `Netbird: v0.76.3 (b999e306d)`）。
+> 之后仓库的 netbird 依赖先升到 0.80.0、再升到 **0.81.1**（v0.80.0→v0.81.1 之间有 100+ 个
+> 上游提交）。换到新基线后要重新复核两条最贴上游的路径：BUG-0001 的"隧道 DNS 地址从哪来"、
+> BUG-0003 的"overlay 网段从哪来" —— 两者都吃 netbird 侧下发的数据结构。
+
 ---
 
 ## BUG-0001 内核 TUN 模式下，本机自查 CustomZone 域名永久挂起：tunnel DNS 地址为空导致从不拨号，fallback 又递归自噬
@@ -238,8 +244,9 @@ if IsKernelMode() { ReconcileKernelRoute(ExtractNetworkCIDR(resp)) }
   实测某次统计：文件 221,948 行，其中 221,946 行（≈100%）是
   `ERROR [<连接号> <耗时>] connection: open connection to <ip>:<端口> using outbound/direct[direct]:
   dial tcp <ip>:<端口>: i/o timeout | connect: connection refused`。
-  增长约 **11–13 MB/天**；配置的 `log.max_size_mb` 到顶后文件被就地截断（实测 52.4 MB → 39.4 MB，
-  没有 `<日志名>.1` 之类的轮转文件）。
+  实测写入速率 ≈ **4.9 MB / 49 分钟 ≈ 143 MB/天**（按行算约 12 万行/小时）；`log.max_size_mb`
+  到顶后文件会被**就地截断**（观测到一次 52.4 MB → 39.4 MB，目录里没有 `<日志名>.1` 之类的
+  轮转文件），所以"文件多大"会严重低估真实写入量。
 * **根因**：连接建立失败这条路径**无条件按 ERROR 记一行**，没有去重、没有节流、没有汇总。
   BT 客户端向 DHT / 对等端发起的连接本来大量不可达（超时 / 拒绝），于是**失败率直接等于日志量**。
   这不是"日志级别配错了"：这些确实是 error 级事件，`log.level` 挡不住。
