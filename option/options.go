@@ -79,6 +79,20 @@ type LogOptions struct {
 	// Unset (0) applies the default cap of 100 MB; a negative value disables
 	// the cap.
 	MaxSizeMB int `json:"max_size_mb,omitempty"`
+	// RepeatLimit caps how many times the same log line is written verbatim per
+	// repeat window. Lines are compared with their volatile parts masked
+	// (timestamps, connection ids, addresses, ports and numbers), so a flood of
+	// identical failures collapses into a single summary line per window
+	// instead of filling the log up.
+	//
+	// Unset (0) applies the default limit of 10; a negative value disables
+	// folding.
+	RepeatLimit int `json:"repeat_limit,omitempty"`
+	// RepeatWindowSec is the length of the repeat window in seconds.
+	//
+	// Unset (0) applies the default of 300 seconds; a negative value disables
+	// folding.
+	RepeatWindowSec int `json:"repeat_window_sec,omitempty"`
 }
 
 type StubOptions struct{}

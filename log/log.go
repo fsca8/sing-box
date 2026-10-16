@@ -63,6 +63,19 @@ func New(options Options) (Factory, error) {
 			logFileMaxSize = 0 // unlimited
 		}
 	}
+	// Repeat folding: within a window only the first repeat_limit lines of the
+	// same shape are written verbatim; the rest collapse into one summary line
+	// per window. Unset keeps the defaults, a negative value disables folding.
+	foldLimit := logOptions.RepeatLimit
+	if foldLimit == 0 {
+		foldLimit = DefaultFoldLimit
+	}
+	foldWindow := DefaultFoldWindow
+	if logOptions.RepeatWindowSec > 0 {
+		foldWindow = time.Duration(logOptions.RepeatWindowSec) * time.Second
+	} else if logOptions.RepeatWindowSec < 0 {
+		foldLimit = 0
+	}
 	factory := NewDefaultFactory(
 		options.Context,
 		logFormatter,
@@ -71,6 +84,7 @@ func New(options Options) (Factory, error) {
 		logFileMaxSize,
 		options.PlatformWriter,
 		options.Observable,
+		FoldOptions{Limit: foldLimit, Window: foldWindow},
 	)
 	if logOptions.Level != "" {
 		logLevel, err := ParseLevel(logOptions.Level)

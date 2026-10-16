@@ -27,6 +27,8 @@ type defaultFactory struct {
 	platformWriters   atomic.Pointer[[]PlatformWriter]
 	needConsole       bool
 	needObservable    bool
+	foldOptions       FoldOptions
+	folding           *foldingWriter
 	level             Level
 	subscriber        *observable.Subscriber[Entry]
 	observer          *observable.Observer[Entry]
@@ -51,6 +53,9 @@ func NewDefaultFactory(
 	fileMaxSize int64,
 	platformWriter PlatformWriter,
 	needObservable bool,
+	// foldOptions is optional so that upstream call sites, which know nothing
+	// about repeat folding, keep compiling untouched.
+	foldOptions ...FoldOptions,
 ) ObservableFactory {
 	factory := &defaultFactory{
 		ctx:       ctx,
@@ -64,6 +69,7 @@ func NewDefaultFactory(
 		needConsole:    writer != io.Discard || filePath != "",
 		fileMaxSize:    fileMaxSize,
 		needObservable: needObservable,
+		foldOptions:    firstFoldOptions(foldOptions),
 		level:          LevelTrace,
 		subscriber:     observable.NewSubscriber[Entry](128),
 	}
@@ -91,6 +97,15 @@ func (f *defaultFactory) Start() error {
 		}
 		f.needConsole = f.writer != io.Discard
 	}
+	if f.needConsole {
+		// Repeat folding sits in front of whichever sink was selected above, so
+		// one noisy shape cannot flood the log file, the console or journald.
+		// nil when folding is disabled (or when there is nothing to wrap).
+		f.folding = newFoldingWriter(f.writer, f.foldOptions)
+		if f.folding != nil {
+			f.writer = f.folding
+		}
+	}
 	if f.needObservable {
 		f.observer = observable.NewObserver[Entry](f.subscriber, 64)
 	}
@@ -109,10 +124,22 @@ func (f *defaultFactory) Close() error {
 	f.startAccess.Lock()
 	f.pendingEntries = nil
 	f.startAccess.Unlock()
+	// Report the repeat counts that are still pending before the sink goes away.
+	if f.folding != nil {
+		f.folding.Flush()
+	}
 	return common.Close(
 		common.PtrOrNil(f.file),
 		f.subscriber,
 	)
+}
+
+// firstFoldOptions keeps repeat folding optional for callers that predate it.
+func firstFoldOptions(options []FoldOptions) FoldOptions {
+	if len(options) == 0 {
+		return FoldOptions{}
+	}
+	return options[0]
 }
 
 func (f *defaultFactory) AttachPlatformWriter(writer PlatformWriter) {
