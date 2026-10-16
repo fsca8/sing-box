@@ -237,6 +237,61 @@ func TestFoldFlush(t *testing.T) {
 	}
 }
 
+// TestFoldSummaryHasNoStrayBlankLine guards the exact bytes of a summary: the
+// shape key must not keep the line's trailing newline, otherwise every summary
+// is followed by a blank line.
+func TestFoldSummaryHasNoStrayBlankLine(t *testing.T) {
+	writer, buffer, clock := newTestFoldingWriter(t, 1, time.Minute)
+	writeFoldLines(t, writer, "ERROR a: dial failed\n", "ERROR a: dial failed\n")
+	clock.Advance(time.Minute)
+	writeFoldLines(t, writer, "ERROR a: dial failed\n")
+	content := buffer.String()
+	if !strings.Contains(content, "[log-fold] suppressed 1 of 2 similar lines in 1m0s") {
+		t.Fatalf("missing summary: %q", content)
+	}
+	if strings.Contains(content, "\n\n") {
+		t.Fatalf("summary left a stray blank line: %q", content)
+	}
+	if !strings.HasSuffix(content, "ERROR a: dial failed\n") {
+		t.Fatalf("summary did not end cleanly: %q", content)
+	}
+}
+
+// TestFoldMultiLinePassthrough keeps panic/stack traces intact: a payload with
+// embedded newlines goes through verbatim and never counts towards a shape.
+func TestFoldMultiLinePassthrough(t *testing.T) {
+	writer, buffer, _ := newTestFoldingWriter(t, 1, 5*time.Minute)
+	payload := "ERROR panic: runtime error\nERROR goroutine 1 [running]:\nERROR main.main()\n"
+	for i := 0; i < 3; i++ {
+		writeFoldLines(t, writer, payload)
+	}
+	content := buffer.String()
+	if strings.Contains(content, "[log-fold]") {
+		t.Fatalf("multi-line payload must not be folded: %q", content)
+	}
+	if count := strings.Count(content, "goroutine 1 [running]:"); count != 3 {
+		t.Fatalf("expected 3 verbatim stack lines, got %d: %q", count, content)
+	}
+}
+
+// TestFoldMultiLineKeepsOrdering: pending counts are still reported before a
+// multi-line payload is written through.
+func TestFoldMultiLineKeepsOrdering(t *testing.T) {
+	writer, buffer, clock := newTestFoldingWriter(t, 1, time.Minute)
+	writeFoldLines(t, writer, "ERROR a: dial failed\n", "ERROR a: dial failed\n")
+	clock.Advance(time.Minute)
+	writeFoldLines(t, writer, "ERROR panic: x\nERROR stack: y\n")
+	content := buffer.String()
+	summaryIndex := strings.Index(content, "[log-fold]")
+	payloadIndex := strings.Index(content, "ERROR panic: x")
+	if summaryIndex < 0 || payloadIndex < 0 || summaryIndex > payloadIndex {
+		t.Fatalf("summary must be reported before the payload: %q", content)
+	}
+	if !strings.Contains(content, "ERROR stack: y") {
+		t.Fatalf("payload was not written through: %q", content)
+	}
+}
+
 // TestFoldTableCap asserts that a shape explosion degrades to "write
 // everything" instead of dropping lines.
 func TestFoldTableCap(t *testing.T) {

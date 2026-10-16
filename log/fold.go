@@ -92,8 +92,14 @@ func (w *foldingWriter) Write(p []byte) (int, error) {
 	now := w.now()
 	var out bytes.Buffer
 	w.pruneLocked(now, &out)
-	for _, line := range splitFoldLines(p) {
-		w.writeLineLocked(now, line, &out)
+	if foldMultiLine(p) {
+		// 多行负载（panic 栈、结构化 dump）每一行都有信息量，原样透传、不参与折叠：
+		// 折叠的收益在这种负载上也不成立（它们不是"每秒钟十几条"的来源）。
+		out.Write(p)
+	} else {
+		for _, line := range splitFoldLines(p) {
+			w.writeLineLocked(now, line, &out)
+		}
 	}
 	if out.Len() == 0 {
 		// 整批都被折叠：对调用方来说这次写入已经"消化"完了。
@@ -192,6 +198,12 @@ func splitFoldLines(p []byte) [][]byte {
 	return lines
 }
 
+// foldMultiLine 判断这次写入是否是多行负载（允许末尾带一个换行）。
+// 多行的按"条"处理，不按行折叠。
+func foldMultiLine(p []byte) bool {
+	return bytes.IndexByte(bytes.TrimRight(p, "\n"), '\n') >= 0
+}
+
 var (
 	// 形如 `+0800 2006-01-02 15:04:05 ` 的时间戳前缀。
 	foldTimestampPattern = regexp.MustCompile(`^[+-][0-9]{4} [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} `)
@@ -203,6 +215,8 @@ var (
 
 // foldShapeOf 把一行日志归一成形状键。
 func foldShapeOf(line []byte) string {
+	// 行尾换行不属于"形状"的一部分：留着它，汇总行自己就会多一个空行。
+	line = bytes.TrimRight(line, "\r\n")
 	if len(line) > foldSampleMaxLen {
 		line = line[:foldSampleMaxLen]
 	}
