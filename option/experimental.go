@@ -23,6 +23,14 @@ type MonitorOptions struct {
 	MaxConnRows int `json:"max_conn_rows,omitempty"`
 	// RetentionDays deletes records older than N days on startup (default 7).
 	RetentionDays int `json:"retention_days,omitempty"`
+	// FailDedupeSec 是失败记录的合并窗口：窗口内对同一目的地（连接侧看
+	// remote+outbound，DNS 侧看 domain+qtype+status）的重复失败只落库第一条。
+	// 一次上游故障会在短时间内产生成片失败记录，正是它们顶满了行数上限。
+	// 默认 60 秒；负值关闭去重（每条失败都落库）。
+	FailDedupeSec int `json:"fail_dedupe_sec,omitempty"`
+	// MaintenanceLogSec 是两行裁剪日志之间的最小间隔（默认 600 秒）；
+	// 被节流掉的裁剪会累计，到下一次输出时一并交代。负值不节流，即每次裁剪都输出。
+	MaintenanceLogSec int `json:"maintenance_log_sec,omitempty"`
 }
 
 type CacheFileOptions struct {

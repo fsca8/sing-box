@@ -177,6 +177,8 @@ func create(options option.Options) (*box.Box, context.CancelFunc, error) {
 			monitorOptions.MaxDNSRows,
 			monitorOptions.MaxConnRows,
 			monitorOptions.RetentionDays,
+			monitorOptions.FailDedupeSec,
+			monitorOptions.MaintenanceLogSec,
 		)
 	}
 	if _, err := monitor.NewCollectorWithLimits(monitorDB, monitorLimits); err != nil {

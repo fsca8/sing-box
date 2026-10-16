@@ -209,21 +209,30 @@ func TestSizeCap(t *testing.T) {
 // disables the cap, a positive value overrides it.
 func TestLimitsFrom(t *testing.T) {
 	defaults := DefaultLimits()
-	unchanged := LimitsFrom(0, 0, 0, 0)
+	unchanged := LimitsFrom(0, 0, 0, 0, 0, 0)
 	if unchanged != defaults {
 		t.Fatalf("zero values must keep the defaults: %+v", unchanged)
 	}
-	disabled := LimitsFrom(-1, -1, -1, -1)
+	disabled := LimitsFrom(-1, -1, -1, -1, -1, -1)
 	if disabled.MaxSizeBytes > 0 || disabled.MaxDNSRows > 0 || disabled.MaxConnRows > 0 || disabled.RetentionDays > 0 {
 		t.Fatalf("negative values must disable the caps: %+v", disabled)
 	}
-	custom := LimitsFrom(50, 1000, 2000, 3)
+	if disabled.FailDedupeWindow > 0 || disabled.MaintenanceLogInterval > 0 {
+		t.Fatalf("negative values must disable dedupe / log throttling: %+v", disabled)
+	}
+	custom := LimitsFrom(50, 1000, 2000, 3, 30, 120)
 	if custom.MaxSizeBytes != 50<<20 || custom.MaxDNSRows != 1000 || custom.MaxConnRows != 2000 || custom.RetentionDays != 3 {
 		t.Fatalf("unexpected custom limits: %+v", custom)
+	}
+	if custom.FailDedupeWindow != 30*time.Second || custom.MaintenanceLogInterval != 120*time.Second {
+		t.Fatalf("expected the windows in seconds, got: %+v", custom)
 	}
 	// withDefaults must not resurrect a disabled cap.
 	applied := disabled.withDefaults()
 	if applied.MaxSizeBytes > 0 || applied.MaxDNSRows > 0 {
 		t.Fatalf("withDefaults re-enabled a disabled cap: %+v", applied)
+	}
+	if applied.FailDedupeWindow > 0 || applied.MaintenanceLogInterval > 0 {
+		t.Fatalf("withDefaults re-enabled a disabled window: %+v", applied)
 	}
 }

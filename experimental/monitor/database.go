@@ -5,6 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,7 +38,14 @@ type Database struct {
 	flushInterval  time.Duration
 	limits         Limits
 	dbPath         string
-	wg             sync.WaitGroup
+	// logWriter 是维护日志的去处，默认 os.Stdout；测试注入缓冲区检查输出。
+	logWriter io.Writer
+	// logMu 保护下面的节流状态：维护协程会周期性调用，启动期也会调用。
+	logMu               sync.Mutex
+	lastLogTime         time.Time
+	logSuppressedPasses int64
+	logSuppressedRows   int64
+	wg                  sync.WaitGroup
 }
 
 // NewDatabase opens (or creates) the SQLite database and starts the async
@@ -64,6 +75,7 @@ func NewDatabaseWithLimits(path string, limits Limits) (*Database, error) {
 		flushInterval: 200 * time.Millisecond,
 		limits:        limits,
 		dbPath:        path,
+		logWriter:     os.Stdout,
 	}
 
 	if err := d.migrate(); err != nil {
@@ -228,7 +240,7 @@ func (d *Database) flushBatch(batch []dbEvent) {
 	updateConnClosed := `UPDATE connection_records SET end_time_ms=?, duration_ms=?, upload_bytes=?, download_bytes=?, closed=1 WHERE conn_id=?`
 	updateConnClosedByDest := `UPDATE connection_records SET end_time_ms=?, duration_ms=?, closed=1 WHERE dest_ip=?`
 	updateConnMeta := `UPDATE connection_records SET host = COALESCE(NULLIF(?, ''), host), outbound = COALESCE(NULLIF(?, ''), outbound) WHERE conn_id = ?`
-	upsertConnLat := `INSERT INTO connection_records (conn_id, dest_ip, domain, outbound, tcp_latency_us, tls_latency_us, start_time_ms, process_path, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(conn_id) DO UPDATE SET dest_ip = COALESCE(NULLIF(excluded.dest_ip, ''), connection_records.dest_ip), tcp_latency_us = MAX(connection_records.tcp_latency_us, excluded.tcp_latency_us), tls_latency_us = MAX(connection_records.tls_latency_us, excluded.tls_latency_us), domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain), outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound), process_path = COALESCE(NULLIF(excluded.process_path, ''), connection_records.process_path), error = COALESCE(NULLIF(excluded.error, ''), connection_records.error)`
+	upsertConnLat := `INSERT INTO connection_records (conn_id, dest_ip, dest_port, domain, outbound, tcp_latency_us, tls_latency_us, start_time_ms, process_path, error, closed, end_time_ms, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(conn_id) DO UPDATE SET dest_ip = COALESCE(NULLIF(excluded.dest_ip, ''), connection_records.dest_ip), dest_port = COALESCE(NULLIF(excluded.dest_port, 0), connection_records.dest_port), tcp_latency_us = MAX(connection_records.tcp_latency_us, excluded.tcp_latency_us), tls_latency_us = MAX(connection_records.tls_latency_us, excluded.tls_latency_us), domain = COALESCE(NULLIF(excluded.domain, ''), connection_records.domain), outbound = COALESCE(NULLIF(excluded.outbound, ''), connection_records.outbound), process_path = COALESCE(NULLIF(excluded.process_path, ''), connection_records.process_path), error = COALESCE(NULLIF(excluded.error, ''), connection_records.error), closed = MAX(COALESCE(connection_records.closed, 0), COALESCE(excluded.closed, 0)), end_time_ms = COALESCE(MAX(connection_records.end_time_ms, excluded.end_time_ms), connection_records.end_time_ms, excluded.end_time_ms), duration_ms = COALESCE(MAX(connection_records.duration_ms, excluded.duration_ms), connection_records.duration_ms, excluded.duration_ms)`
 
 	stmtDNS, _ := tx.Prepare(insertDNS)
 	stmtConn, _ := tx.Prepare(insertConn)
@@ -273,8 +285,9 @@ func (d *Database) flushBatch(batch []dbEvent) {
 				continue
 			}
 			r := e.Data.(*ConnectionRecord)
+			destIP, destPort := connDest(r)
 			stmtConn.Exec(
-				r.ID, r.Host, r.Domain, r.DestIP, r.DestPort, r.Rule, r.Outbound,
+				r.ID, r.Host, r.Domain, destIP, destPort, r.Rule, r.Outbound,
 				r.TCPLatencyUs, r.TLSLatencyUs, r.DNSLatencyUs, r.TLSVersion, r.CipherSuite,
 				r.UploadBytes, r.DownloadBytes, r.StartTime,
 				r.EndTime, r.DurationMs, boolToInt(r.Closed),
@@ -309,7 +322,25 @@ func (d *Database) flushBatch(batch []dbEvent) {
 			r := e.Data.(map[string]interface{})
 			pp, _ := r["process_path"].(string)
 			errStr, _ := r["error"].(string)
-			stmtLat.Exec(r["conn_id"], r["dest_ip"], r["domain"], r["outbound"], r["tcp"], r["tls"], r["start_time"], pp, errStr)
+			dest, _ := r["dest_ip"].(string)
+			destIP, destPort := splitHostPort(dest)
+			tcpLatencyUs, _ := r["tcp"].(int64)
+			tlsLatencyUs, _ := r["tls"].(int64)
+			startTime, _ := r["start_time"].(int64)
+			// 拨号失败就是这条连接的结局：顺手补上结束时间与耗时，否则这些行
+			// 永远停在"进行中"——时间线里看不到失败，也得等保留期才回收。
+			var endTimeArg, durationArg interface{}
+			closed := 0
+			if errStr != "" {
+				closed = 1
+				latencyUs := tcpLatencyUs
+				if tlsLatencyUs > latencyUs {
+					latencyUs = tlsLatencyUs
+				}
+				durationMs := latencyUs / 1000
+				endTimeArg, durationArg = startTime+durationMs, durationMs
+			}
+			stmtLat.Exec(r["conn_id"], destIP, destPort, r["domain"], r["outbound"], r["tcp"], r["tls"], r["start_time"], pp, errStr, closed, endTimeArg, durationArg)
 		case "traffic_sync":
 			records := e.Data.(*[]TrafficRecord)
 			upsertTraffic := `INSERT INTO connection_records
@@ -354,6 +385,30 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// splitHostPort 把 "host:port" 拆成主机与端口，拆不出来（没有端口、IPv6 没带
+// 方括号等）就原样返回、端口记 0：宁可只写地址，也别把端口糊在 dest_ip 里。
+func splitHostPort(addr string) (string, int) {
+	host, portText, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr, 0
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		return addr, 0
+	}
+	return host, port
+}
+
+// connDest 取一条连接记录的目的地与端口：端口优先取地址里带的，其次才用
+// 记录自带的 DestPort（有的调用方是分开传的）。
+func connDest(r *ConnectionRecord) (string, int) {
+	host, port := splitHostPort(r.DestIP)
+	if port == 0 {
+		port = r.DestPort
+	}
+	return host, port
 }
 
 // ---- Non-blocking writes (hot-path) ----

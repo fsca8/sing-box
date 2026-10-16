@@ -4,6 +4,7 @@ package monitor
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -151,21 +152,67 @@ func (d *Database) signalPrune() {
 // rows deleted.
 func (d *Database) enforceLimits() int64 {
 	var deleted int64
+	// 记下是哪些上限触发了裁剪：维护日志以前只说"体积"，实际常常是行数
+	// 上限在干活，读日志的人会找错方向。
+	var reasons []string
 
 	if d.limits.MaxConnRows > 0 {
-		deleted += d.trimRows("connection_records", "start_time_ms", d.limits.MaxConnRows)
+		if rows := d.trimRows("connection_records", "start_time_ms", d.limits.MaxConnRows); rows > 0 {
+			deleted += rows
+			reasons = append(reasons, "conn row cap")
+		}
 	}
 	if d.limits.MaxDNSRows > 0 {
-		deleted += d.trimRows("dns_records", "timestamp_ms", d.limits.MaxDNSRows)
+		if rows := d.trimRows("dns_records", "timestamp_ms", d.limits.MaxDNSRows); rows > 0 {
+			deleted += rows
+			reasons = append(reasons, "dns row cap")
+		}
 	}
 	if d.limits.MaxSizeBytes > 0 && d.mainLogicalSize() > d.sizeTarget() {
-		deleted += d.trimToSize()
+		if rows := d.trimToSize(); rows > 0 {
+			deleted += rows
+			reasons = append(reasons, "size cap")
+		}
 	}
 	if deleted > 0 {
-		fmt.Printf("[monitor] pruned %d records (db now %s, cap %s)\n",
-			deleted, formatBytes(d.footprint()), formatBytes(d.limits.MaxSizeBytes))
+		d.logPrune(deleted, strings.Join(reasons, "+"))
 	}
 	return deleted
+}
+
+// logMaintenance 输出一行维护日志，不节流：异常信息每次都该被看见。
+// 格式串自带换行；输出端可注入（见 Database.logWriter）。
+func (d *Database) logMaintenance(format string, args ...any) {
+	out := d.logWriter
+	if out == nil {
+		out = os.Stdout
+	}
+	fmt.Fprintf(out, format, args...)
+}
+
+// logPrune 输出裁剪日志，同一进程内最多每 MaintenanceLogInterval 一行；
+// 被压掉的次数与行数先攒着，下次输出时一并交代——安静但没丢信息。
+func (d *Database) logPrune(deleted int64, reason string) {
+	interval := d.limits.MaintenanceLogInterval
+
+	d.logMu.Lock()
+	if interval > 0 && !d.lastLogTime.IsZero() && time.Since(d.lastLogTime) < interval {
+		d.logSuppressedPasses++
+		d.logSuppressedRows += deleted
+		d.logMu.Unlock()
+		return
+	}
+	suppressedPasses, suppressedRows := d.logSuppressedPasses, d.logSuppressedRows
+	d.logSuppressedPasses, d.logSuppressedRows = 0, 0
+	d.lastLogTime = time.Now()
+	d.logMu.Unlock()
+
+	line := fmt.Sprintf("[monitor] pruned %d records (%s; db now %s, size cap %s)",
+		deleted, reason, formatBytes(d.footprint()), formatBytes(d.limits.MaxSizeBytes))
+	if suppressedPasses > 0 {
+		line += fmt.Sprintf(" (suppressed %d passes, %d records)", suppressedPasses, suppressedRows)
+	}
+	d.logMaintenance("%s\n", line)
 }
 
 // trimRows deletes the oldest rows of a table until only maxRows remain.
@@ -206,7 +253,7 @@ func (d *Database) trimToSize() int64 {
 		}
 		deleted += roundDeleted
 		if err := d.checkpoint(); err != nil {
-			fmt.Printf("[monitor] checkpoint failed: %v\n", err)
+			d.logMaintenance("[monitor] checkpoint failed: %v\n", err)
 			break
 		}
 	}

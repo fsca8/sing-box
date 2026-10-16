@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Collector struct {
@@ -19,6 +20,13 @@ type Collector struct {
 	// connMap 是"连接建立→关闭"之间的匹配表，关闭链路目前不保证被调用，
 	// 不设上限会在长期运行的网关上无界增长。
 	connOrder []string
+	// failConn / failDNS 抑制窗口内成片重复的失败记录（见 failDedupe）。
+	// 两侧分开一个实例，键的构成不同（连接是 remote|outbound，DNS 是
+	// domain|qtype|status），混在一起也没有好处。都由 c.mu 保护。
+	failConn *failDedupe
+	failDNS  *failDedupe
+	// now 是去重用的时钟，默认 time.Now；测试注入它就不必按窗口真等。
+	now func() time.Time
 	// eventCB 用 atomic 存：热路径（DNS/dial goroutine）读，Kotlin 侧随时可设。
 	eventCB atomic.Pointer[func(string)] // callback to push JSON to Android
 }
@@ -30,6 +38,65 @@ var globalCollector atomic.Pointer[Collector]
 // maxConnMapEntries 内存中待匹配连接表的上限（超出按插入顺序淘汰最旧的一批）。
 const maxConnMapEntries = 4096
 
+// maxFailDedupeEntries 是失败去重表的上限：上游故障/重试风暴会在短时间对同一
+// 目标产生成片失败记录，但长期运行的目标又会不断更换，表本身同样要有上限。
+const maxFailDedupeEntries = 4096
+
+// failDedupe 只回答一个问题：窗口内重复的同键失败，这次还要不要落库。
+// 它不碰 ring buffer，也不碰事件推送——那两条路径必须照旧。
+// 键由调用方拼，调用者需自行保证并发安全（Collector 用 c.mu）。
+type failDedupe struct {
+	window time.Duration
+	seen   map[string]time.Time
+	// order 记录入表顺序，用于按 maxFailDedupeEntries 淘汰最旧的条目，
+	// 写法与 connMap/connOrder 一致。
+	order []failEntry
+}
+
+type failEntry struct {
+	key  string
+	seen time.Time
+}
+
+func newFailDedupe(window time.Duration) *failDedupe {
+	return &failDedupe{window: window, seen: make(map[string]time.Time)}
+}
+
+// allow 判断这次失败是否要落库：窗口内同一个键只放行第一条。
+// window <= 0 表示关闭去重；nil 接收者（手工构造的 Collector）一律放行。
+func (f *failDedupe) allow(key string, now time.Time) bool {
+	if f == nil || f.window <= 0 {
+		return true
+	}
+	if seen, ok := f.seen[key]; ok && now.Sub(seen) < f.window {
+		return false
+	}
+	f.seen[key] = now
+	f.order = append(f.order, failEntry{key: key, seen: now})
+	for len(f.order) > maxFailDedupeEntries {
+		oldest := f.order[0]
+		f.order = f.order[1:]
+		// 同一个键在窗口过后会再次入表，顺序表里就留着它的旧条目；时间对不上
+		// 说明这条已被更新的条目取代，不能顺手把这个键删掉。
+		if seen, ok := f.seen[oldest.key]; ok && seen.Equal(oldest.seen) {
+			delete(f.seen, oldest.key)
+		}
+	}
+	// order 反复切片后底层数组会一直挂着，积到一定量就搬一次家。
+	if cap(f.order) > 4*maxFailDedupeEntries && len(f.order) < 2*maxFailDedupeEntries {
+		f.order = append([]failEntry(nil), f.order...)
+	}
+	return true
+}
+
+// nowFn 读去重时钟；未注入时退回 time.Now。
+func (c *Collector) nowFn() time.Time {
+	if c.now == nil {
+		return time.Now()
+	}
+	return c.now()
+}
+
 // NewCollector creates the collector with the default growth caps
 // (100 MB / 200k DNS rows / 100k connection rows / 7 days).
 func NewCollector(dbPath string) (*Collector, error) {
@@ -39,6 +106,7 @@ func NewCollector(dbPath string) (*Collector, error) {
 // NewCollectorWithLimits creates the collector with explicit growth caps
 // (see LimitsFrom for the config file mapping).
 func NewCollectorWithLimits(dbPath string, limits Limits) (*Collector, error) {
+	limits = limits.withDefaults()
 	dir := filepath.Dir(dbPath)
 	os.MkdirAll(dir, 0755)
 
@@ -48,10 +116,13 @@ func NewCollectorWithLimits(dbPath string, limits Limits) (*Collector, error) {
 	}
 
 	c := &Collector{
-		dnsBuf:  NewRingBuffer[DNSRecord](500),
-		connBuf: NewRingBuffer[ConnectionRecord](200),
-		db:      db,
-		connMap: make(map[string]*ConnectionRecord),
+		dnsBuf:   NewRingBuffer[DNSRecord](500),
+		connBuf:  NewRingBuffer[ConnectionRecord](200),
+		db:       db,
+		connMap:  make(map[string]*ConnectionRecord),
+		failConn: newFailDedupe(limits.FailDedupeWindow),
+		failDNS:  newFailDedupe(limits.FailDedupeWindow),
+		now:      time.Now,
 	}
 	// 重载时替换全局 collector：先把旧的关掉，避免泄漏库句柄与写入协程。
 	if old := globalCollector.Swap(c); old != nil {
@@ -112,15 +183,27 @@ func (c *Collector) RecordDNS(r DNSRecord) {
 	r.Timestamp = nowMs()
 	c.mu.Lock()
 	c.dnsBuf.Push(r)
+	// 失败的解析在故障期间会成片重复，只让窗口内的第一条落库；
+	// 缓冲区与事件推送照旧，界面上的实时流水不受影响。
+	writeRecord := true
+	if r.Status == "ERROR" {
+		writeRecord = c.failDNS.allow(dnsFailKey(r), c.nowFn())
+	}
 	c.mu.Unlock()
 
 	// Async SQLite write (non-blocking)
-	if c.db != nil {
+	if c.db != nil && writeRecord {
 		c.db.WriteDNS(&r)
 	}
 
 	ev := Event{Type: "dns", Timestamp: r.Timestamp, DNS: &r}
 	c.pushJSON(ev)
+}
+
+// dnsFailKey 是 DNS 失败去重的键；status 写进键里，便于把键读成
+// "哪个域名、哪种记录、什么结果"。
+func dnsFailKey(r DNSRecord) string {
+	return r.Domain + "|" + r.QType + "|" + r.Status
 }
 
 func (c *Collector) RecordDNSRejected(domain string) {
@@ -175,10 +258,16 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 			conn.Error = r.Error
 		}
 	}
+	// 拨号失败在故障期间会成片重复，只让窗口内的第一条落库；connMap
+	// 与事件推送照旧，热路径上的其它行为不变。
+	writeLatency := true
+	if r.Error != "" {
+		writeLatency = c.failConn.allow(connFailKey(r), c.nowFn())
+	}
 	c.mu.Unlock()
 
 	// Sync latency to SQLite (per-connection INSERT, traffic_sync upserts same row by conn_id)
-	if c.db != nil {
+	if c.db != nil && writeLatency {
 		c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, r.LatencyUs, 0, r.ProcessPath, r.Error)
 	}
 
@@ -186,6 +275,11 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 	b, _ := json.Marshal(r)
 	ev.Message = string(b)
 	c.pushJSON(ev)
+}
+
+// connFailKey 是连接失败去重的键：同一个目的地同一个出站才算同一类失败。
+func connFailKey(r TCPRecord) string {
+	return r.Remote + "|" + r.Outbound
 }
 
 // ---- TLS ----

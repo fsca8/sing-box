@@ -13,7 +13,9 @@ import "time"
 //	    "max_size_mb": 100,      // cap on the on-disk size (default 100)
 //	    "max_dns_rows": 200000,  // row caps, size-independent guard
 //	    "max_conn_rows": 100000,
-//	    "retention_days": 7      // time-based retention, applied on startup
+//	    "retention_days": 7,     // time-based retention, applied on startup
+//	    "fail_dedupe_sec": 60,   // failure dedup window (default 60)
+//	    "maintenance_log_sec": 600 // prune log throttle (default 600)
 //	  }
 //	}
 const (
@@ -28,6 +30,12 @@ const (
 	DefaultRetentionDays = 7
 	// DefaultMaintenanceInterval is how often the caps are enforced at runtime.
 	DefaultMaintenanceInterval = time.Minute
+	// DefaultFailDedupeWindow 是失败记录的合并窗口：上游故障/重试风暴会在
+	// 短时间对同一目标产生成片失败记录，一次故障就能顶满行数上限。
+	DefaultFailDedupeWindow = time.Minute
+	// DefaultMaintenanceLogInterval 是两行裁剪日志之间的最小间隔：维护每分钟
+	// 跑一次，但"又裁了多少行"这件事一小时看一次就够了。
+	DefaultMaintenanceLogInterval = 10 * time.Minute
 )
 
 // Limits caps the growth of the monitor database. All fields are optional:
@@ -45,23 +53,32 @@ type Limits struct {
 	RetentionDays int
 	// MaintenanceInterval overrides DefaultMaintenanceInterval.
 	MaintenanceInterval time.Duration
+	// FailDedupeWindow 之内的重复失败（同一 remote+outbound，或同一
+	// domain+qtype+status）只落库第一条（0 用默认值，负值关闭去重）。
+	FailDedupeWindow time.Duration
+	// MaintenanceLogInterval 节流裁剪日志：窗口内的裁剪只累计不输出
+	// （0 用默认值，负值不节流，即每次裁剪都输出）。
+	MaintenanceLogInterval time.Duration
 }
 
 // DefaultLimits returns the built-in caps (100 MB / 200k DNS / 100k conn / 7d).
 func DefaultLimits() Limits {
 	return Limits{
-		MaxSizeBytes:        DefaultMaxSizeBytes,
-		MaxDNSRows:          DefaultMaxDNSRows,
-		MaxConnRows:         DefaultMaxConnRows,
-		RetentionDays:       DefaultRetentionDays,
-		MaintenanceInterval: DefaultMaintenanceInterval,
+		MaxSizeBytes:           DefaultMaxSizeBytes,
+		MaxDNSRows:             DefaultMaxDNSRows,
+		MaxConnRows:            DefaultMaxConnRows,
+		RetentionDays:          DefaultRetentionDays,
+		MaintenanceInterval:    DefaultMaintenanceInterval,
+		FailDedupeWindow:       DefaultFailDedupeWindow,
+		MaintenanceLogInterval: DefaultMaintenanceLogInterval,
 	}
 }
 
 // LimitsFrom builds Limits from configuration values (the
 // `experimental.monitor` block). For every value: 0 keeps the default,
 // a negative value disables that cap, a positive value overrides it.
-func LimitsFrom(maxSizeMB, maxDNSRows, maxConnRows, retentionDays int) Limits {
+// failDedupeSec / maintenanceLogSec are given in seconds.
+func LimitsFrom(maxSizeMB, maxDNSRows, maxConnRows, retentionDays, failDedupeSec, maintenanceLogSec int) Limits {
 	limits := DefaultLimits()
 	if maxSizeMB != 0 {
 		if maxSizeMB < 0 {
@@ -91,6 +108,20 @@ func LimitsFrom(maxSizeMB, maxDNSRows, maxConnRows, retentionDays int) Limits {
 			limits.RetentionDays = retentionDays
 		}
 	}
+	if failDedupeSec != 0 {
+		if failDedupeSec < 0 {
+			limits.FailDedupeWindow = -1
+		} else {
+			limits.FailDedupeWindow = time.Duration(failDedupeSec) * time.Second
+		}
+	}
+	if maintenanceLogSec != 0 {
+		if maintenanceLogSec < 0 {
+			limits.MaintenanceLogInterval = -1
+		} else {
+			limits.MaintenanceLogInterval = time.Duration(maintenanceLogSec) * time.Second
+		}
+	}
 	return limits
 }
 
@@ -110,6 +141,12 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaintenanceInterval <= 0 {
 		l.MaintenanceInterval = DefaultMaintenanceInterval
+	}
+	if l.FailDedupeWindow == 0 {
+		l.FailDedupeWindow = DefaultFailDedupeWindow
+	}
+	if l.MaintenanceLogInterval == 0 {
+		l.MaintenanceLogInterval = DefaultMaintenanceLogInterval
 	}
 	return l
 }
