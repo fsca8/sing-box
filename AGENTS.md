@@ -23,6 +23,9 @@ netbird 集成等自有功能。给 agent / 新协作者的最小须知，细节
   go.mod/go.sum 里（上游没有该依赖，且本 fork 需要 netbird 侧修改）。见
   `go.work.example`（复制为 `go.work`，按 checkout 位置改 `use` 路径）。缺 workspace 时
   构建会报 `no required module provides package github.com/netbirdio/netbird/...`。
+* 工作区 `go` 行取两个模块 requirement 的较大者：netbird 0.80.0/0.81.x 要求 `go >= 1.26.0`
+  （其 go.mod 还把工具链钉在 go1.26.7），本仓库是 1.25.5 → `go.work` 写 `go 1.26.0`。
+  `dev.sh` 在 netbird 构建时固定 `GOTOOLCHAIN`（默认 go1.26.8）到该线以上。
 * ⚠️ **不要跑 `go mod tidy`**：它把 netbird 当远端模块解析，会拉到无法解析的伪版本
   （`pion/ice/v4@v4.0.0-00010101000000-000000000000: invalid version`）。加依赖用
   `go mod edit -require=` + `GOWORK=off go mod download <mod>@<ver>` 落 go.sum。

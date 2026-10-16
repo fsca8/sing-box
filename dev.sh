@@ -122,7 +122,7 @@ if [ "$WITH_NETBIRD" = true ]; then
             echo "ERROR: 在上一层 ($_parent) 未找到 netbird 目录" >&2
             echo "  请将 netbird 仓库放到该目录, 或手动拉取到上一层:" >&2
             echo "    git clone https://github.com/netbirdio/netbird.git \"$_parent/netbird\"" >&2
-            echo "    # 然后 checkout 所需上游 tag (如 v0.76.0)" >&2
+            echo "    # 然后 checkout 所需上游 tag (如 v0.80.0)" >&2
             echo "  或设置环境变量 NETBIRD_DIR=<绝对路径> 指定位置" >&2
             exit 1
         fi
@@ -163,10 +163,12 @@ else
     echo "  (use './dev.sh release' for stripped release build)"
 fi
 
-# Ensure GOTOOLCHAIN is set for netbird builds (requires go >= 1.25.5)
+# Ensure GOTOOLCHAIN is set for netbird builds. netbird 的 go.mod 自身要求
+# go >= 1.26.0 且把工具链钉在 go1.26.7（go.dev/issue/77875 的补丁版本），
+# 所以固定到一个 >= 1.26.7 的补丁版本，而不是用系统里可能过新的工具链。
 if [ "$WITH_NETBIRD" = true ] && [ "${GOTOOLCHAIN:-auto}" = "auto" ]; then
-    export GOTOOLCHAIN=go1.25.5
-    echo "  GOTOOLCHAIN=go1.25.5 (netbird requires go >= 1.25.5)"
+    export GOTOOLCHAIN=go1.26.8
+    echo "  GOTOOLCHAIN=go1.26.8 (netbird requires go >= 1.26.7)"
 fi
 
 # ── Build ────────────────────────────────────────────────────────────

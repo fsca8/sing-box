@@ -13,7 +13,11 @@
 //	<workdir>/netbird/         ← netbird fork checkout
 //
 // 只构建不带 netbird 的产物时不需要 workspace，直接在本仓库 `go build ./...`。
-go 1.25.5
+//
+// go 行取两个模块 requirement 的较大者：netbird 0.80.0/0.81.x 要求 go >= 1.26.0
+// （其 go.mod 还把工具链钉在 go1.26.7），sing-box 是 1.25.5。
+// dev.sh 会在 netbird 构建时固定 GOTOOLCHAIN，避免用系统里可能过新的工具链。
+go 1.26.0
 
 use (
 	./sing-box

@@ -10,7 +10,7 @@ import netbirdversion "github.com/netbirdio/netbird/version"
 // sing-box), so the real netbird revision must be injected explicitly.
 var netbirdBuildCommit = ""
 
-// NetbirdVersion returns the netbird engine version (upstream tag, e.g. "v0.76.0").
+// NetbirdVersion returns the netbird engine version (upstream tag, e.g. "v0.80.0").
 func NetbirdVersion() string {
 	return netbirdversion.NetbirdVersion()
 }
