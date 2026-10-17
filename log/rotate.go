@@ -10,12 +10,15 @@ import (
 	"github.com/sagernet/sing/service/filemanager"
 )
 
-// DefaultLogFileMaxSize is the default size cap applied to the log file
-// written when `log.output` points to a file (100 MiB).
+// DefaultLogFileMaxSize is the size cap applied to the log file written when
+// `log.output` points to a file (100 MiB).
 //
-// Rationale: the log file used to grow without bound (a 19GB singbox.log was
-// observed in production). The cap is now configurable via
-// `log.max_size_mb` in the config file.
+// Rationale: the log file used to grow without bound (a 19GB log file was
+// observed in production).
+//
+// The cap is intentionally a constant and not a config field: it used to be
+// exposed as `log.max_size_mb`, which is not an upstream option, and a config
+// carrying such a key is rejected by upstream sing-box's strict decoder.
 const DefaultLogFileMaxSize int64 = 100 << 20
 
 // rotateKeepRatio is the fraction of the cap kept when the file is rotated.
@@ -44,6 +47,17 @@ type rotatingFileWriter struct {
 	size    int64
 }
 
+// NewFileWriter opens path as an append-only, size-capped log writer with the
+// same circular-overwrite semantics as the engine log file: once the cap is
+// reached the oldest content is dropped, so the newest lines are always
+// available and the file never exceeds maxSize. maxSize <= 0 disables the cap.
+//
+// Auxiliary logs that share the engine log's constraints use this (e.g. the
+// embedded netbird engine log, which must not grow without bound).
+func NewFileWriter(ctx context.Context, path string, maxSize int64) (io.Writer, error) {
+	return newRotatingFileWriter(ctx, path, maxSize)
+}
+
 // newRotatingFileWriter opens (or creates) the log file and applies the cap
 // immediately: a file left oversized by a previous unbounded run is trimmed
 // on the first write, keeping only its newest lines.
@@ -65,9 +79,27 @@ func newRotatingFileWriter(ctx context.Context, path string, maxSize int64) (*ro
 	return writer, nil
 }
 
+// Close releases the underlying file handle. The engine keeps its log writer
+// open for the whole process lifetime; callers that are done with a writer
+// (tests, short-lived auxiliary logs) should close it — on Windows a file that
+// is still open cannot be deleted.
+func (w *rotatingFileWriter) Close() error {
+	w.access.Lock()
+	defer w.access.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	err := w.file.Close()
+	w.file = nil
+	return err
+}
+
 func (w *rotatingFileWriter) Write(p []byte) (int, error) {
 	w.access.Lock()
 	defer w.access.Unlock()
+	if w.file == nil {
+		return 0, os.ErrClosed
+	}
 	if w.maxSize > 0 {
 		// 以文件真实大小为准：同一个文件可能有别的 writer/进程在写，
 		// 只靠自己累加的计数器会漏掉那些字节，导致永远不轮转。

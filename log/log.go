@@ -50,18 +50,12 @@ func New(options Options) (Factory, error) {
 		FullTimestamp:    logOptions.Timestamp,
 		TimestampFormat:  "-0700 2006-01-02 15:04:05",
 	}
-	// Log file size cap (circular overwrite): default 100 MB, configurable
-	// with log.max_size_mb, negative disables the cap.
+	// Log file size cap (circular overwrite). The cap is a fixed engine-side
+	// constant, deliberately not configurable: "log" keeps no fork-only keys, so
+	// a config written for this fork stays valid for upstream sing-box.
 	var logFileMaxSize int64
 	if logFilePath != "" {
-		switch {
-		case logOptions.MaxSizeMB > 0:
-			logFileMaxSize = int64(logOptions.MaxSizeMB) << 20
-		case logOptions.MaxSizeMB == 0:
-			logFileMaxSize = DefaultLogFileMaxSize
-		default:
-			logFileMaxSize = 0 // unlimited
-		}
+		logFileMaxSize = DefaultLogFileMaxSize
 	}
 	// Repeat folding: within a window only the first repeat_limit lines of the
 	// same shape are written verbatim; the rest collapse into one summary line

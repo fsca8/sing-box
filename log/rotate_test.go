@@ -16,6 +16,8 @@ func TestRotatingFileWriterUnderCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows 上文件仍被打开时 TempDir 清理会失败，测试结束前必须关掉。
+	t.Cleanup(func() { _ = writer.Close() })
 	for i := 0; i < 10; i++ {
 		if _, err = writer.Write([]byte("line-0000\n")); err != nil {
 			t.Fatal(err)
@@ -46,6 +48,8 @@ func TestRotatingFileWriterCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows 上文件仍被打开时 TempDir 清理会失败，测试结束前必须关掉。
+	t.Cleanup(func() { _ = writer.Close() })
 	line := strings.Repeat("x", lineLen)
 	for i := 0; i < lines; i++ {
 		if _, err = writer.Write([]byte(line + "\n")); err != nil {
@@ -89,6 +93,8 @@ func TestRotatingFileWriterTrimsOversizedFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows 上文件仍被打开时 TempDir 清理会失败，测试结束前必须关掉。
+	t.Cleanup(func() { _ = writer.Close() })
 	if _, err = writer.Write([]byte(strings.Repeat("z", 63) + "\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -116,6 +122,8 @@ func TestRotatingFileWriterUnlimited(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows 上文件仍被打开时 TempDir 清理会失败，测试结束前必须关掉。
+	t.Cleanup(func() { _ = writer.Close() })
 	line := strings.Repeat("u", 1023) + "\n"
 	for i := 0; i < 200; i++ {
 		if _, err = writer.Write([]byte(line)); err != nil {
@@ -141,6 +149,8 @@ func TestRotatingFileWriterOversizedWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows 上文件仍被打开时 TempDir 清理会失败，测试结束前必须关掉。
+	t.Cleanup(func() { _ = writer.Close() })
 	// 4097 bytes in one Write: 4096 'x' characters then a newline and a marker line.
 	payload := strings.Repeat("x", 4096) + "\n" + "TAIL-MARKER\n"
 	n, err := writer.Write([]byte(payload))
@@ -173,6 +183,8 @@ func TestRotatingFileWriterLongLineKeepsWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows 上文件仍被打开时 TempDir 清理会失败，测试结束前必须关掉。
+	t.Cleanup(func() { _ = writer.Close() })
 	// First write leaves the file full of one newline-free blob.
 	blob := strings.Repeat("A", 3000)
 	if _, err = writer.Write([]byte(blob)); err != nil {
@@ -210,6 +222,8 @@ func TestRotatingFileWriterConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows 上文件仍被打开时 TempDir 清理会失败，测试结束前必须关掉。
+	t.Cleanup(func() { _ = writer.Close() })
 	done := make(chan error, writers)
 	line := []byte(strings.Repeat("c", 79) + "\n")
 	for i := 0; i < writers; i++ {

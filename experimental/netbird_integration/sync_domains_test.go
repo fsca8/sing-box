@@ -38,6 +38,39 @@ func TestExtractNetworkCIDR(t *testing.T) {
 		t.Fatalf("legacy path: got %q, want 100.99.0.0/16", got)
 	}
 
+	// 管理端下发带前缀长度的 WireGuard 地址("<ip>/<bits>", 当前服务端一律
+	// 这么拼) —— 前缀本身就是 overlay 网段, 必须原样采用
+	resp2b := &mgmProto.SyncResponse{
+		NetworkMap: &mgmProto.NetworkMap{
+			PeerConfig: &mgmProto.PeerConfig{Address: "100.99.5.6/16"},
+		},
+	}
+	if got := ExtractNetworkCIDR(resp2b); got != "100.99.0.0/16" {
+		t.Fatalf("prefixed /16: got %q, want 100.99.0.0/16", got)
+	}
+
+	// 非 /16 的账户网络: 用服务端给的前缀, 不再假设 /16
+	resp2c := &mgmProto.SyncResponse{
+		NetworkMap: &mgmProto.NetworkMap{
+			PeerConfig: &mgmProto.PeerConfig{Address: "10.20.30.40/24"},
+		},
+	}
+	if got := ExtractNetworkCIDR(resp2c); got != "10.20.30.0/24" {
+		t.Fatalf("prefixed /24: got %q, want 10.20.30.0/24", got)
+	}
+
+	// IPv6 / 非法地址不带出网段
+	for _, bad := range []string{"fd00::5/8", "100.99.0.2/33", "not-an-address"} {
+		respBad := &mgmProto.SyncResponse{
+			NetworkMap: &mgmProto.NetworkMap{
+				PeerConfig: &mgmProto.PeerConfig{Address: bad},
+			},
+		}
+		if got := ExtractNetworkCIDR(respBad); got != "" {
+			t.Fatalf("bad address %q: got %q, want \"\"", bad, got)
+		}
+	}
+
 	// 非默认前缀的对端地址也正确掩码
 	resp3 := &mgmProto.SyncResponse{
 		NetworkMap: &mgmProto.NetworkMap{
@@ -51,6 +84,22 @@ func TestExtractNetworkCIDR(t *testing.T) {
 	// nil / 空
 	if got := ExtractNetworkCIDR(nil); got != "" {
 		t.Fatalf("nil: got %q", got)
+	}
+}
+
+// TestPrefixedPeerAddressEndToEnd pins the user-visible invariant behind a
+// prefixed peer address: a sync response whose peer address is "<ip>/<bits>"
+// must still yield a usable tunnel DNS server address. When it did not, the
+// resolver had no target at all and every custom-zone lookup answered
+// SERVFAIL for the whole process lifetime.
+func TestPrefixedPeerAddressEndToEnd(t *testing.T) {
+	resp := &mgmProto.SyncResponse{
+		NetworkMap: &mgmProto.NetworkMap{
+			PeerConfig: &mgmProto.PeerConfig{Address: "100.99.5.6/16"},
+		},
+	}
+	if got := ComputeDNSAddr(ExtractNetworkCIDR(resp)); got != "100.99.255.254:53" {
+		t.Fatalf("prefixed peer address: DNS addr = %q, want 100.99.255.254:53", got)
 	}
 }
 

@@ -16,11 +16,17 @@ import (
 	"sync"
 	"time"
 
+	sbLog "github.com/sagernet/sing-box/log"
 	log "github.com/sirupsen/logrus"
 
 	nbembed "github.com/netbirdio/netbird/client/embed"
 	nbnet "github.com/netbirdio/netbird/client/net"
 )
+
+// netbirdLogMaxSize caps the embedded netbird engine log. The writer drops the
+// oldest lines once the cap is reached (circular overwrite), so a long-running
+// session keeps the most recent history without ever filling the disk.
+const netbirdLogMaxSize int64 = 5 << 20
 
 // StartAllResult holds the result of StartAll.
 type StartAllResult struct {
@@ -289,7 +295,17 @@ func (e *Engine) postStartSync() {
 					log.Warn("netbird: reconcile kernel route after restart: ", err)
 				}
 			} else {
-				SetDNSAddr(ComputeDNSAddr(ExtractNetworkCIDR(resp)))
+				// Netstack mode: the tunnel DNS server address is derived from
+				// the account network in the sync response. Keep the previous
+				// address when this response carries no usable prefix (a
+				// delta/partial response must not wipe a working resolver) but
+				// say so — an empty address makes every custom-zone lookup
+				// SERVFAIL, and that is otherwise only visible per query.
+				if dnsAddr := ComputeDNSAddr(ExtractNetworkCIDR(resp)); dnsAddr != "" {
+					SetDNSAddr(dnsAddr)
+				} else {
+					log.Warn("netbird: sync response carries no usable overlay CIDR; tunnel DNS address left as-is")
+				}
 			}
 			// 引擎恢复后的自定义域名实时注入: 重写 rule-set 文件(域名+真实
 			// CIDR), sing-box 的 LocalRuleSet fswatch 运行时重载规则 —
@@ -437,17 +453,21 @@ func (e *Engine) Start() error {
 	os.MkdirAll(stateDir, 0700)
 	opts.ConfigPath = filepath.Join(stateDir, "config.json")
 	opts.StatePath = filepath.Join(stateDir, "state.json")
-	// Send netbird engine logs to DataDir/nb-engine.log so relay/P2P
-	// paths, peer states and bridge failures are diagnosable. The default
-	// os.Stderr sink is swallowed by gomobile/libbox on Android.
-	if logFile, err := os.OpenFile(
-		filepath.Join(e.cfg.DataDir, "nb-engine.log"),
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600,
-	); err == nil {
-		opts.LogOutput = logFile
-		log.Info("netbird: engine logs → " + filepath.Join(e.cfg.DataDir, "nb-engine.log"))
+	// Send netbird engine logs to DataDir/logs/netbird.log (the same log
+	// directory as the sing-box engine log) so relay/P2P paths, peer states
+	// and bridge failures are diagnosable, and so the app's unified log
+	// viewer can list them. The default os.Stderr sink is swallowed by
+	// gomobile/libbox on Android. The writer applies the same circular
+	// overwrite size cap as the engine log, so the file cannot grow unbounded.
+	netbirdLogPath := filepath.Join(e.cfg.DataDir, "logs", "netbird.log")
+	if err := os.MkdirAll(filepath.Dir(netbirdLogPath), 0o755); err != nil {
+		log.Warn("netbird: create log directory: ", err)
+	}
+	if logWriter, err := sbLog.NewFileWriter(context.Background(), netbirdLogPath, netbirdLogMaxSize); err == nil {
+		opts.LogOutput = logWriter
+		log.Info("netbird: engine logs → " + netbirdLogPath)
 	} else {
-		log.Warn("netbird: open nb-engine.log: ", err)
+		log.Warn("netbird: open netbird.log: ", err)
 	}
 
 	// Kernel-TUN mode (Linux only): real kernel TUN + no netbird-managed
@@ -725,6 +745,16 @@ func (e *Engine) refreshDomainsFromSync() {
 	syncCancel()
 	if err != nil || resp == nil {
 		return
+	}
+	// Netstack mode: refresh the tunnel DNS server address from the same
+	// response. The initial StartAll sync wait is only 5s, so a slow first
+	// sync — the very case this refresh exists for — also leaves the DNS
+	// address unset; without this the resolver stays dead until the process
+	// restarts. Only ever set a non-empty address.
+	if !IsKernelMode() {
+		if dnsAddr := ComputeDNSAddr(ExtractNetworkCIDR(resp)); dnsAddr != "" {
+			SetDNSAddr(dnsAddr)
+		}
 	}
 	e.refreshDomainsFile(ExtractDomainsFromSync(resp), ExtractNetworkCIDR(resp))
 }

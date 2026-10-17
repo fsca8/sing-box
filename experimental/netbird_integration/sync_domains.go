@@ -76,16 +76,22 @@ func ExtractDomainsFromSync(resp *mgmProto.SyncResponse) []string {
 	return domains
 }
 
+// netbirdDefaultOverlayBits is the overlay network size netbird assigns to an
+// account when the management server ships no prefix at all (oldest wire
+// formats send the peer address without a mask).
+const netbirdDefaultOverlayBits = 16
+
 // ExtractNetworkCIDR extracts the account's IPv4 overlay subnet (e.g.
-// e.g. "<net>.0.0/16") from the netbird SyncResponse.
+// "100.90.0.0/16") from the netbird SyncResponse.
 //
 // Priority:
 //  1. NetworkMapEnvelope.full.network.net_cidr — exact prefix from the
 //     component-based wire format.
-//  2. NetworkMap.peerConfig.address masked to the netbird subnet size (/16).
-//     The legacy wire format doesn't ship the prefix, but every account
-//     network is a /16 inside 100.64.0.0/10, so the containing /16 of the
-//     peer's own address is the network prefix.
+//  2. NetworkMap.peerConfig.address — the peer's own WireGuard address, which
+//     is "<ip>/<bits>" on every current management server (it is built as
+//     fmt.Sprintf("%s/%d", peerIP, accountNetmask)) and a bare "<ip>" on the
+//     oldest ones. The prefixed form *is* the overlay network; a bare address
+//     is masked to the netbird account default (/16).
 //
 // Returns "" when neither source is available (caller falls back to the
 // netbird overlay /16).
@@ -104,8 +110,17 @@ func ExtractNetworkCIDR(resp *mgmProto.SyncResponse) string {
 	}
 	if peer := resp.GetNetworkMap().GetPeerConfig(); peer != nil {
 		if addr := peer.GetAddress(); addr != "" {
+			// Parse the prefixed form with ParsePrefix: ParseAddr rejects
+			// "<ip>/<bits>" outright, so a ParseAddr-only implementation
+			// silently returns "" against a prefixed server. Everything
+			// derived from it (overlay CIDR rule-set, tunnel DNS address)
+			// then stays empty and every custom-zone lookup SERVFAILs.
+			if prefix, err := netip.ParsePrefix(addr); err == nil &&
+				prefix.Addr().Is4() && prefix.Bits() < 32 {
+				return prefix.Masked().String()
+			}
 			if ip, err := netip.ParseAddr(addr); err == nil && ip.Is4() {
-				return netip.PrefixFrom(ip, 16).Masked().String()
+				return netip.PrefixFrom(ip, netbirdDefaultOverlayBits).Masked().String()
 			}
 		}
 	}

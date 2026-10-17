@@ -16,6 +16,9 @@
 | BUG-0003 | overlay 路由/规则永远装不上（周期自愈被同步检查短路） | ✅ 已修复 | `944b45300` |
 | BUG-0004 | 每个失败拨号都打一条 ERROR：日志被拨号失败刷满 | ✅ 已修复 | `96d8e1b5f` `527c79e6f` |
 | BUG-0005 | monitor 连接记录只记"打开"半边、字段恒为初值，且每分钟裁剪刷日志 | ✅ 已修复 | `8d6dc2971` |
+| BUG-0006 | 日志上限的键名与 app 不一致导致引擎拒启动；netbird 引擎日志无上限且不在统一目录 | ✅ 已修复（未提交） | — |
+| BUG-0007 | 用户态 netstack 模式隧道 DNS 地址恒为空：带前缀长度的 peer 地址被当裸 IP 解析 | ✅ 已修复（未提交） | — |
+| BUG-0008 | `log.max_size_mb` 是 fork 独有的配置键（上游没有日志轮转）：改为固定 100MB 常量 | ✅ 已修复（未提交） | — |
 
 **状态只有三种取值**：`✅ 已修复` / `🟡 已定位、未修复` / `🔴 已知、未定位`。
 每条标题下的第一项 "状态" 写了修复提交与验证到什么程度；`grep -n "^## BUG-" BUGS.md`
@@ -32,6 +35,12 @@
 > `direct` 出站 + 40 次必然失败的连接，不需要 root、不碰线上服务）；BUG-0005 有单测覆盖，并配了
 > 只读的核对脚本。两者**都尚未上机**——下一次 release 构建会同时带上它们与 netbird 0.81.1，
 > 届时按上面两条重新复核，并确认新产物上 BUG-0004 的折叠与 BUG-0005 的字段写入确实生效。
+>
+> **复核结果（0.81.1）：两条都吃到了下发结构的变化 —— 见 BUG-0007。** 管理端下发的
+> `peer_config.address` 带上了前缀长度（`"<ip>/<bits>"`），而旧解析只认裸 IP，
+> 于是 overlay 网段恒为空、用户态模式下隧道 DNS 地址跟着恒为空。BUG-0001 那条是在
+> 0.76.3 的**内核模式**上验证的，而内核模式的 DNS 地址走接口地址另一条路，
+> 正好把用户态这条路径的问题遮住了。
 
 ---
 
@@ -381,3 +390,193 @@ if IsKernelMode() { ReconcileKernelRoute(ExtractNetworkCIDR(resp)) }
     每分钟写入量明显下降、journal 里 `monitor` 行从约 1 条/分钟降到约 1 条/10 分钟、
     DNS 表里同一个 `(domain, qtype)` 的 ERROR 不再成片。
   * 预期：库不再每分钟抖动（体积稳定），连接表里只剩有信息量的行。
+
+---
+
+## BUG-0006 日志文件上限的键名与 app 不一致（严格解码直接拒绝启动）；netbird 引擎日志既不在统一目录、也没有上限
+
+* **状态**：✅ 已修复（改动**尚未提交**）。验证到：编译通过（`-tags with_netbird`）、
+  `check` 对两种键名的实测（见下）、复用写者的单测本来就覆盖循环覆盖语义。
+  **netbird 日志落盘那一段没有端到端验证**（需要真实 netbird 凭据跑起来），
+  只到"编译 + 路径/上限由已测写者保证"。组件跨两个仓库：
+  sing-box 侧 `option/options.go`、`log/rotate.go`、`experimental/netbird_integration/netbird.go`，
+  app 侧（singbird）`lib/services/singbox_controller.dart` 的日志规范化。
+* **现象**：
+  1. app 生成的配置里写 `log.max_file_size_mb`，而 fork 迁到上游 v1.14.3 后该字段叫 `log.max_size_mb`
+     （旧分支用的是 `max_file_size_mb`；改名提交只改了 Go 侧）。sing-box 的配置解码是**严格**的，
+     于是 `check -c <app 生成的配置>` 直接：
+     `FATAL decode config: log.max_file_size_mb: json: unknown field "max_file_size_mb"`（退出码 1），
+     换成 `max_size_mb` 则通过。**只要是带 `log` 段的 profile，引擎根本起不来** ——
+     不是"上限没生效"那么轻。
+  2. netbird 引擎日志写在 `<DataDir>/nb-engine.log`：不在统一日志目录 `logs/` 下（所以日志中心的
+     `netbird` 源恒为空、`LogParser` 里的 logrus 分支永远吃不到东西），裸 `os.OpenFile`
+     **没有任何大小上限**，而且 app 的启动清理把它当"旧版散落文件"删掉 —— 跨重启历史全丢。
+* **根因**：日志"文件约定"只落在 app 侧文档里，Go 侧的字段名与目录约定各写各的；
+  迁移上游版本时字段改名没有任何一处契约检查来兜住。
+* **修复**：
+  1. `log/rotate.go` 导出 `log.NewFileWriter(ctx, path, maxSize)`，把引擎日志那套循环覆盖写者
+     （到顶丢最旧的行、单文件、并发安全）给别的日志复用。
+  2. `experimental/netbird_integration/netbird.go`：netbird 引擎日志改到
+     `<DataDir>/logs/netbird.log`（与 `engine.log` 同目录），上限 5MB 循环覆盖，目录先 `MkdirAll`。
+  3. app 侧：写 `log.max_size_mb`，并**删除**配置里可能残留的旧键 `max_file_size_mb`
+     （兼容老版本存下来的 profile 与旧的运行时配置）。
+  4. `<DataDir>/nb-engine.log` 的启动清理**保持不变**：现在它只剩"旧版遗留"这一个身份，
+     清掉是对的。
+* **修好后怎么验**：
+  * `check -c`：`log.max_size_mb` 通过；`log.max_file_size_mb` 报 unknown field。
+  * 跑起来后 `logs/netbird.log` 会出现且不超过 5MB，`logs/engine.log` 不超过配置的上限，
+    两者都**不产生** `.1` 备份文件（循环覆盖语义）。
+  * 日志中心的 netbird 源从"恒空"变成有内容；重启 app 后 netbird 历史仍在。
+* **没做什么**：没有给 netbird 日志做"备份文件"式的真轮转（那要引入 netbird 自带的
+  timberjack 依赖到 sing-box 的 go.mod，或自己实现改名逻辑），统一按循环覆盖处理；
+  上限写死 5MB，没做成配置项。
+
+---
+
+## BUG-0007 用户态(netstack)模式下隧道 DNS 地址恒为空：带前缀长度的 peer 地址被当裸 IP 解析
+
+* **状态**：✅ 已修复（未提交）。
+* **组件**：`experimental/netbird_integration`（`sync_domains.go`、`netbird.go`）。
+* **影响面**：**所有走用户态 netstack 的部署**（`kernelTun=false`：Windows app、Android app）。
+  netbird 隧道本身是通的 —— 管理端 stream、ICE、WG 握手、P2P/relay、`/netbird/peers`
+  全部正常（peer 是 `Connected`，带实时握手与延迟）—— **坏掉的只有 overlay 名字解析**：
+  任何 CustomZone 名字（`*.netbird.selfhosted` 与账号里配置的自定义域名）查询都答
+  SERVFAIL，于是 app 的"连通性测试"显示"连接失败或超时"，用域名访问 overlay 上的服务
+  都在数秒后失败。
+
+### 结论
+
+用户态模式下 tunnel DNS 地址**只有一个来源**：同步响应里的 overlay 网段。
+
+    SetDNSAddr(ComputeDNSAddr(ExtractNetworkCIDR(resp)))      // netbird.go postStartSync
+
+而 `ExtractNetworkCIDR` 的两条来源在新基线上都拿不到值：
+
+1. `NetworkMapEnvelope.full.network.net_cidr` —— 组件式结构，本账号的会话里没有：
+   域名走的是 **legacy** `network_map`（`network_map.dns_config` 能取到域名，所以
+   `nb-domains.json` 每次启动都被重写，而 `nb-cidr.json` 的 mtime 停在很久以前 ——
+   "域名有、网段没有"就是这个 bug 的文件指纹）；
+2. `peer_config.address` —— 管理端下发的是 **WireGuard 地址配置 `"<ip>/<bits>"`**
+   （服务端用 `fmt.Sprintf("%s/%d", peer.IP, accountNetmask)` 拼出，例如 `100.64.7.9/16`），
+   而旧代码只试 `netip.ParseAddr`；`ParseAddr` **拒绝**带前缀的串，于是直接落到 `return ""`。
+
+结果：`ComputeDNSAddr("") == ""` → `dnsAddr` 全程为空 → DNS transport 的
+`ensureNetbirdDNSAddr` 每个查询都以 `tunnel DNS address not set` 失败（**不建任何 socket**）。
+日志上表现为每个查询一条
+
+    WARN netbird DNS: <name>. via <unset> failed: tunnel DNS address not set (engine has not synced yet)
+
+而同一时刻 netbird 引擎自己的日志显示 `sync finished`、多个 peer `first wg handshake detected`、
+relay established —— 极容易误判成"netbird 连不上"。**这句 WARN 的措辞也有误导性**：
+"engine has not synced yet" 与实际原因（同步成功、但地址算不出来）无关。
+
+BUGS.md 顶部"换到 0.81.1 后要复核 BUG-0001 的隧道 DNS 地址来源"的警告，兑现的就是这一条。
+BUG-0001 当时是在 0.76.3 的**内核模式**上验证的，内核模式的地址由 `SetupKernelRoute`
+从 WG 接口地址取（另一条路径），所以用户态这条路径的问题被掩盖了。
+
+### 修复
+
+1. `sync_domains.go`：`ExtractNetworkCIDR` 先用 `netip.ParsePrefix` 解 `"<ip>/<bits>"`
+   —— 前缀本身就是 overlay 网段，掩码后直接返回（非 /16 的账户网络也适用）；解不出来
+   才退回"裸 IPv4 + 默认 /16"。IPv6、`/33`、非法串仍然返回 `""`。
+2. `netbird.go`：`postStartSync`（引擎重启后重同步）与周期刷新 `refreshDomainsFromSync`
+   （网络监视器每 30s 一次）都改成**只在算出非空地址时才写** `SetDNSAddr` —— 增量/残缺的
+   同步响应不许把已经生效的地址擦掉；算不出来时打一条 WARN。周期刷新这一处同时补上了
+   "首次 5s sync 等待超时"的自愈：此前该场景下地址会空到进程结束。
+
+### 验证
+
+* 单测：`TestExtractNetworkCIDR` 新增带前缀（`/16`、`/24`）、IPv6、`/33`、非法串用例；
+  新增 `TestPrefixedPeerAddressEndToEnd` 断言 `ComputeDNSAddr(ExtractNetworkCIDR(resp))`
+  在带前缀地址的响应上给出可用地址。
+  `go test -tags with_netbird ./experimental/netbird_integration/` 全绿。
+* 上机（修复前，用户态）：引擎 Clash API `/dns/query?name=<自定义域名>&type=A` 返回
+  `Status: 2`（SERVFAIL）且无 Answer，同一时刻 `/netbird/peers` 里 peer 是
+  `conn_status: Connected` 并带 `last_handshake`；对照 `/dns/query?name=example.com` 正常。
+  这组对照就是"隧道通、DNS 不通"的定位证据。
+* 修复后：同一条 `/dns/query` 应返回 Answer（overlay 地址），"连通性测试"用域名应能连上。
+
+### 没做什么
+
+* 没有改成"从 netbird 客户端的接口地址取 DNS 地址"（上游 `client/iface/device` 的做法）——
+  那要碰 netbird 的 embed API 与 netstack 生命周期，改动面远大于解析一个前缀；当前
+  `sync response → 网段 → last-but-one IP` 的推导与上游 `GetLastIPFromNetwork` 一致
+  （已有 `TestComputeDNSAddrMatchesNetbird` 对照）。
+* 没动那句 WARN 的 "engine has not synced yet"（它同时也覆盖"引擎还没起来"的真实情形）。
+
+---
+
+## BUG-0008 `log.max_size_mb` 是 fork 独有的配置键：fork 写出的配置上游不认（改为固定 100MB 常量）
+
+* **状态**：✅ 已修复（未提交，未构建/未上机）。
+* **组件**：`option/options.go`、`log/log.go`、`log/rotate.go`、`log/rotate_test.go`、
+  `docs/configuration/log/index.md|index.zh.md`；app 侧 `lib/services/singbox_controller.dart`。
+
+### 结论
+
+日志文件上限**不需要**是配置项。去掉 `log.max_size_mb` 字段，引擎固定使用
+`log.DefaultLogFileMaxSize`（100 MiB）的循环覆盖写者；app 侧不再写这个键，并顺手清掉
+历史版本可能残留在配置里的 `max_size_mb` / `max_file_size_mb`。
+
+### 证据（为什么必须去掉）
+
+* fork 的 `option.LogOptions` 多了一个字段：
+
+  ```go
+  MaxSizeMB int `json:"max_size_mb,omitempty"`
+  ```
+
+  上游 `origin/testing` 的 `LogOptions` 只有 `disabled` / `level` / `output` / `timestamp` /
+  `disable_color`。上游**完全没有**日志轮转：`log/observable.go` 用
+  `filemanager.OpenFile(..., os.O_APPEND|os.O_CREATE|os.O_WRONLY, ...)` 一路追加到底，
+  `git grep -in 'rotation\|logrotate\|lumberjack' origin/testing` 零命中。
+* sing-box 的配置解码是**严格**的：多一个未知键就是
+  `decode config: json: unknown field "..."` + 退出码 1。因此
+  **fork 生成的配置拿给上游跑会直接起不来**（反向兼容：上游配置给 fork 跑没问题）。
+  这是 BUG-0006 的另一半 —— 那边是键名不一致（`max_file_size_mb` → `max_size_mb`）把**自己**
+  弄挂了，这次是键本身**只存在于 fork**。
+* app 侧 `_normalizeLogOutput` 过去会往每个 profile 的引擎配置里硬写 `max_size_mb = 5`，
+  于是**所有**导出的引擎配置都带一个上游不认的键。
+
+### 修复
+
+* `option/options.go`：删掉 `MaxSizeMB` 字段，留注释说明"上限是引擎常量、不是配置项"。
+  （`experimental.monitor.max_size_mb` 是另一个子系统的字段，与日志无关，保持不动。）
+* `log/log.go`：不再从配置推导，`log.output` 指向文件时直接用 `DefaultLogFileMaxSize`；
+  内部 `fileMaxSize` 参数保留（`NewDefaultFactory` / `NewFileWriter` 的 API 不变，
+  netbird 引擎日志的 5MB 上限走同一个 `NewFileWriter`，不受影响）。
+* `log/rotate.go`：`DefaultLogFileMaxSize` 的注释改成"常量、故意不可配置"，并说明原因。
+* 顺手修的测试卫生：新增 `(*rotatingFileWriter).Close()`（`Write` 加 closed 守卫），
+  `rotate_test.go` 7 个用例各加 `t.Cleanup(func() { _ = writer.Close() })`。
+  在此之前 Windows 上 `t.TempDir()` 清理删不掉仍被打开的文件，6 个用例报
+  `TempDir RemoveAll cleanup: ... being used by another process` —— 断言其实是通过的，
+  但 `go test ./log/...` 整体 FAIL，等于这条回归网没有可信信号。
+* 文档：`docs/configuration/log/index*.md` 删掉 `max_size_mb` 结构行与字段段，
+  改在 `#### output` 下写明"上限固定 100 MB、循环覆盖、不可配置"。
+* app 侧：`_normalizeLogOutput` 不再写键，改为**移除** `max_size_mb` 与 `max_file_size_mb`
+  两个历史键（只要存在就重写配置）；`README.md`、`lib/logkit/README.md` 同步。
+  这一步是必须的，否则新引擎读到旧配置里的 `max_size_mb: 5` 会因未知字段拒绝启动。
+
+### 行为差异（有意为之）
+
+| 配置里的 `log.max_size_mb` | 旧引擎 | 新引擎 |
+| --- | --- | --- |
+| 缺失 | 100 MB（旧代码 `==0` 分支就是默认值） | 100 MB |
+| 正数 | 按该值（app 写的是 5） | 未知字段 → **拒绝启动** |
+| 负数 | 关闭上限（无上限） | 未知字段 → **拒绝启动** |
+
+"不配置"的行为完全一致，失去的只是"用负数彻底关掉上限"这一能力 —— 代价是配置格式与上游分叉，
+不值得保留。
+
+### 验证
+
+* `go test -count=1 ./log/...` → `ok github.com/sagernet/sing-box/log`（7 个轮转用例全绿）。
+* `go vet ./log/... ./option/... ./cmd/sing-box/... ./experimental/libbox/... ./experimental/netbird_integration/... ./experimental/boxdd/...`
+  → 只剩两处**既有的** `possible misuse of unsafe.Pointer`（`libbox/debug.go`、
+  `boxdd/authenticode_windows.go`，与本次改动无关）；改动涉及的包全部编译通过。
+* app 侧：`flutter analyze` → `No issues found!`；`flutter test` → 54 个用例全过。
+* **未做**：没有构建、没有部署。上机时**引擎与 app 必须一起换**：新 app + 旧引擎没问题
+  （旧引擎把缺失的键当默认 100MB）；**旧 app + 新引擎会挂**（旧 app 会写 `max_size_mb: 5`）。
+  另外换上新引擎后要让 app 重启一次，它才会把磁盘上已有的 `sing-box-config.json`
+  重写成不带该键的版本。
+

@@ -72,13 +72,12 @@ type LogOptions struct {
 	Output       string `json:"output,omitempty"`
 	Timestamp    bool   `json:"timestamp,omitempty"`
 	DisableColor bool   `json:"-"`
-	// MaxSizeMB caps the size of the log file written when Output points to a
-	// file. When the cap is reached the oldest lines are dropped first
-	// (circular overwrite), so the file never grows past the cap.
+	// The five fields above are upstream sing-box's LogOptions. The two below are
+	// fork-only keys (upstream rejects them as unknown).
 	//
-	// Unset (0) applies the default cap of 100 MB; a negative value disables
-	// the cap.
-	MaxSizeMB int `json:"max_size_mb,omitempty"`
+	// The size cap of the log file written when Output points to a file is NOT a
+	// config field: it is the fixed constant log.DefaultLogFileMaxSize (100 MiB),
+	// so log rotation never shows up in the config file.
 	// RepeatLimit caps how many times the same log line is written verbatim per
 	// repeat window. Lines are compared with their volatile parts masked
 	// (timestamps, connection ids, addresses, ports and numbers), so a flood of
