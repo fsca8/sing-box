@@ -49,16 +49,16 @@ type StartAllResult struct {
 // extracts custom domains, and injects netbird DNS/outbound/route rules
 // into the sing-box config.
 //
-// If cfg is nil or has no credentials (SetupKey and JWTToken both empty),
-// returns the original singBoxConfig unchanged with Engine=nil.
+// If cfg is nil or has no credentials at all (setup_key, jwt_token and
+// private_key all empty, no environment fallback), returns the original
+// singBoxConfig unchanged with Engine=nil.
 func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	result := &StartAllResult{}
 
 	if cfg == nil {
 		return result, nil
 	}
-	hasCreds := cfg.SetupKey != "" || cfg.JWTToken != ""
-	if !hasCreds {
+	if !cfg.hasCredentials() {
 		log.Info("netbird: no credentials, skipping")
 		result.ModifiedConfig = singBoxConfig
 		return result, nil
@@ -68,7 +68,7 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	// and a single static kernel route sends the overlay CIDR straight to it,
 	// bypassing the sing-box TUN stack (single TCP termination, official-app
 	// performance). Windows/Android keep the userspace netstack path.
-	kernelTun := cfg.KernelTun && runtime.GOOS == "linux"
+	kernelTun := cfg.Network.KernelTun && runtime.GOOS == "linux"
 	SetKernelMode(kernelTun)
 	log.Info(fmt.Sprintf("netbird: data path: %s", map[bool]string{true: "kernel-tun (wt0)", false: "userspace netstack"}[kernelTun]))
 
@@ -84,7 +84,7 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	// netbird my_custom 分支), 彻底绕开 AAAA 慢查询。预热带 3s 超时,
 	// 避免无网络时解析挂起拖慢骨架返回。
 	var ctlIPs []string
-	if u, err := url.Parse(cfg.ManagementURL); err == nil && u.Hostname() != "" {
+	if u, err := url.Parse(cfg.Device.ManagementURL); err == nil && u.Hostname() != "" {
 		dnsCtx, dnsCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		addrs, err := net.DefaultResolver.LookupIP(dnsCtx, "ip4", u.Hostname())
 		dnsCancel()
@@ -200,7 +200,7 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 			}
 		}
 	}
-	modified, err := InjectNetbirdJSON(singBoxConfig, cfg.ManagementURL, ctlIPs, ruleSetPath, cidrPath)
+	modified, err := InjectNetbirdJSON(singBoxConfig, cfg.Device.ManagementURL, ctlIPs, ruleSetPath, cidrPath)
 	if err != nil {
 		// Non-fatal: sing-box still runs, just without netbird rules
 		log.Warn("inject netbird config: ", err)
@@ -334,51 +334,9 @@ type Engine struct {
 	cidrSig    string
 }
 
-// Config holds configuration for the netbird engine.
-type Config struct {
-	DeviceName    string `json:"device_name"`
-	SetupKey      string `json:"setup_key"`
-	JWTToken      string `json:"jwt_token"`
-	ManagementURL string `json:"management_url"`
-	AdminURL      string `json:"admin_url"`
-	LogLevel      string `json:"log_level"`
-	DataDir       string `json:"data_dir"`
-	// KernelTun enables the Linux kernel-TUN data path (Route A):
-	// netbird creates a real kernel TUN (wt0) and a single static kernel
-	// route sends the overlay CIDR directly to it, bypassing the sing-box
-	// TUN stack. Only honored on Linux; Windows/Android always use the
-	// userspace netstack path. Requires root.
-	KernelTun bool `json:"kernel_tun"`
-	// PrivateKey authenticates as an existing device (direct key auth),
-	// e.g. to reuse a running netbird daemon's identity during migration.
-	// Mutually exclusive with SetupKey/JWTToken.
-	PrivateKey string `json:"private_key"`
-	// ExposePorts lists overlay→local TCP port forwards. Each entry makes
-	// the netbird engine listen on the given port inside the overlay
-	// (netstack) and forward accepted connections to the local target.
-	// Needed because the userspace netstack cannot deliver inbound
-	// connections to processes listening on the host kernel stack.
-	ExposePorts []ExposePortConfig `json:"expose_ports"`
-}
-
-// ExposePortConfig declares one overlay→local TCP forward.
-type ExposePortConfig struct {
-	// Port is the port to listen on inside the netbird overlay.
-	Port int `json:"port"`
-	// Target is the local host:port to forward to (e.g. "127.0.0.1:8022").
-	Target string `json:"target"`
-}
-
 // Status represents engine status.
 type Status struct {
 	Running bool `json:"running"`
-}
-
-// UnifiedConfig is the top-level config that wraps both engines.
-type UnifiedConfig struct {
-	Netbird *Config `json:"netbird"`
-	// SingBox is left unstructured — sing-box parses its own section.
-	SingBox json.RawMessage `json:"sing_box"`
 }
 
 // NewEngine creates a new netbird engine wrapper with the given config.
@@ -386,15 +344,9 @@ func NewEngine(cfg *Config) *Engine {
 	if cfg == nil {
 		cfg = &Config{}
 	}
-	if cfg.DeviceName == "" {
-		cfg.DeviceName = "sing-netbird"
-	}
-	if cfg.ManagementURL == "" {
-		cfg.ManagementURL = "https://api.netbird.io:443"
-	}
-	if cfg.LogLevel == "" {
-		cfg.LogLevel = "info"
-	}
+	// Fill the documented defaults here as well: embed hosts build a Config
+	// field by field and do not necessarily go through the file parser.
+	cfg.applyDefaults()
 	return &Engine{cfg: cfg, stopCh: make(chan struct{})}
 }
 
@@ -423,33 +375,53 @@ func (e *Engine) Start() error {
 	}
 
 	// Fall back to env vars for credentials if not in config
-	setupKey := e.cfg.SetupKey
-	jwtToken := e.cfg.JWTToken
-	privateKey := e.cfg.PrivateKey
-	if setupKey == "" {
-		setupKey = os.Getenv("NB_SETUP_KEY")
-	}
-	if jwtToken == "" {
-		jwtToken = os.Getenv("NB_JWT_TOKEN")
-	}
-	if privateKey == "" {
-		privateKey = os.Getenv("NB_PRIVATE_KEY")
-	}
+	setupKey := envFallback(e.cfg.Device.SetupKey, "NB_SETUP_KEY")
+	jwtToken := envFallback(e.cfg.Device.JWTToken, "NB_JWT_TOKEN")
+	privateKey := envFallback(e.cfg.Device.PrivateKey, "NB_PRIVATE_KEY")
 	if setupKey == "" && jwtToken == "" && privateKey == "" {
-		log.Warn("netbird: no SetupKey, JWTToken or PrivateKey set, engine may not authenticate")
+		log.Warn("netbird: no setup_key, jwt_token or private_key configured, engine may not authenticate")
 	}
 
 	opts := nbembed.Options{
-		DeviceName:    e.cfg.DeviceName,
-		SetupKey:      setupKey,
-		JWTToken:      jwtToken,
-		PrivateKey:    privateKey,
-		ManagementURL: e.cfg.ManagementURL,
-		LogLevel:      e.cfg.LogLevel,
+		DeviceName:            e.cfg.Device.Name,
+		SetupKey:              setupKey,
+		JWTToken:              jwtToken,
+		PrivateKey:            privateKey,
+		ManagementURL:         e.cfg.Device.ManagementURL,
+		LogLevel:              e.cfg.Log.Level,
+		PreSharedKey:          e.cfg.Security.PreSharedKey,
+		EnableRosenpass:       e.cfg.Security.Rosenpass,
+		RosenpassPermissive:   e.cfg.Security.RosenpassPermissive,
+		LazyConnectionEnabled: e.cfg.LazyConnection,
+		DisableIPv6:           e.cfg.Network.DisableIPv6,
+		DisableClientRoutes:   e.cfg.Network.DisableClientRoutes,
+		BlockLANAccess:        e.cfg.Network.BlockLANAccess,
+		BlockInbound:          e.cfg.Network.BlockInbound,
+		DNSLabels:             e.cfg.Network.DNSLabels,
+		NATExternalIPs:        e.cfg.Network.NATExternalIPs,
+		Performance: nbembed.Performance{
+			PreallocatedBuffersPerPool: optionalUint32(e.cfg.Performance.PreallocatedBuffersPerPool),
+			MaxBatchSize:               optionalUint32(e.cfg.Performance.MaxBatchSize),
+		},
+	}
+	// Pointer-valued options stay nil when the file does not set them, so
+	// netbird keeps its stored/platform default instead of being pinned to
+	// zero. The bounds are re-checked here because Start() is also reachable
+	// with a hand-built Config that never went through Validate().
+	if mtu := e.cfg.Network.MTU; mtu == 0 {
+		// keep the stored/default MTU
+	} else if mtu < minTunnelMTU || mtu > maxTunnelMTU {
+		log.Warn(fmt.Sprintf("netbird: ignoring network.mtu %d (valid range %d..%d)", mtu, minTunnelMTU, maxTunnelMTU))
+	} else {
+		value := uint16(mtu)
+		opts.MTU = &value
+	}
+	if port := e.cfg.Network.WireguardPort; port > 0 && port <= 65535 {
+		opts.WireguardPort = &port
 	}
 	// Persist state to reuse WireGuard key across restarts, avoiding
 	// the ~20s management registration delay on subsequent starts.
-	stateDir := filepath.Join(e.cfg.DataDir, "nb-state")
+	stateDir := e.cfg.stateDir()
 	os.MkdirAll(stateDir, 0700)
 	opts.ConfigPath = filepath.Join(stateDir, "config.json")
 	opts.StatePath = filepath.Join(stateDir, "state.json")
@@ -459,7 +431,7 @@ func (e *Engine) Start() error {
 	// viewer can list them. The default os.Stderr sink is swallowed by
 	// gomobile/libbox on Android. The writer applies the same circular
 	// overwrite size cap as the engine log, so the file cannot grow unbounded.
-	netbirdLogPath := filepath.Join(e.cfg.DataDir, "logs", "netbird.log")
+	netbirdLogPath := filepath.Join(e.cfg.logsDir(), "netbird.log")
 	if err := os.MkdirAll(filepath.Dir(netbirdLogPath), 0o755); err != nil {
 		log.Warn("netbird: create log directory: ", err)
 	}
@@ -475,7 +447,7 @@ func (e *Engine) Start() error {
 	// DisableDNS/DisableFirewall are not exposed, so they are pre-seeded
 	// into netbird's profile config file (profilemanager preserves file
 	// values when the corresponding ConfigInput pointers are nil).
-	kernelTun := e.cfg.KernelTun && runtime.GOOS == "linux"
+	kernelTun := e.cfg.Network.KernelTun && runtime.GOOS == "linux"
 	if kernelTun {
 		opts.NoUserspace = true
 		opts.DisableClientRoutes = true
@@ -580,30 +552,24 @@ func (e *Engine) watchStopped() bool {
 	}
 }
 
-// Rule-set source files: the custom-domain list (nb-domains.json, referenced
-// by the DNS rule AND the route rule) and the overlay CIDR (nb-cidr.json,
-// referenced by the route rule only). They must stay separate files — see
-// writeDomainsRuleSet's NOTE on DNS-referenced IP-bearing sets.
+// Rule-set source files, both inside the engine's nb-state directory: the
+// custom-domain list (nb-domains.json, referenced by the DNS rule AND the
+// route rule) and the overlay CIDR (nb-cidr.json, referenced by the route rule
+// only). They must stay separate files — see writeDomainsRuleSet's NOTE on
+// DNS-referenced IP-bearing sets.
 const domainsRuleSetFile = "nb-domains.json"
 const cidrRuleSetFile = "nb-cidr.json"
 
-// domainsRuleSetPath returns the absolute path of the custom-domain rule-set
-// file. Falls back to the OS temp dir when DataDir is unset (CLI runs).
+// domainsRuleSetPath returns the path of the custom-domain rule-set file. It
+// lives in netbird's own state directory (nb-state/) so the data directory
+// root only holds the config files a user is meant to look at.
 func domainsRuleSetPath(cfg *Config) string {
-	dir := cfg.DataDir
-	if dir == "" {
-		dir = os.TempDir()
-	}
-	return filepath.Join(dir, domainsRuleSetFile)
+	return filepath.Join(cfg.stateDir(), domainsRuleSetFile)
 }
 
-// cidrRuleSetPath returns the absolute path of the overlay-CIDR rule-set file.
+// cidrRuleSetPath returns the path of the overlay-CIDR rule-set file.
 func cidrRuleSetPath(cfg *Config) string {
-	dir := cfg.DataDir
-	if dir == "" {
-		dir = os.TempDir()
-	}
-	return filepath.Join(dir, cidrRuleSetFile)
+	return filepath.Join(cfg.stateDir(), cidrRuleSetFile)
 }
 
 // domainsSig returns a stable fingerprint of the domain list (sorted join),
@@ -651,6 +617,11 @@ func writeDomainsRuleSet(path string, domains []string) error {
 	if err != nil {
 		return err
 	}
+	// The state directory may not exist yet: on the async start path these
+	// files are written before Start() creates it.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
 	return os.WriteFile(path, data, 0o644)
 }
 
@@ -669,6 +640,9 @@ func writeCidrRuleSet(path string, cidr string) error {
 		"rules":   rules,
 	})
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
@@ -792,34 +766,6 @@ func (e *Engine) GetStatus() *Status {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return &Status{Running: e.running}
-}
-
-// ParseConfig parses a netbird config JSON string.
-func ParseConfig(configJSON string) (*Config, error) {
-	var cfg Config
-	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
-		return nil, fmt.Errorf("parse netbird config: %w", err)
-	}
-	if cfg.DeviceName == "" {
-		cfg.DeviceName = "sing-netbird"
-	}
-	if cfg.LogLevel == "" {
-		cfg.LogLevel = "info"
-	}
-	return &cfg, nil
-}
-
-// ReadUnifiedConfig reads a unified JSON config file and returns the parsed structure.
-func ReadUnifiedConfig(path string) (*UnifiedConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-	var cfg UnifiedConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-	return &cfg, nil
 }
 
 // writeNetbirdProfileConfig pre-seeds netbird's own profile config file

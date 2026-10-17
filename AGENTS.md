@@ -46,7 +46,11 @@ netbird 集成等自有功能。给 agent / 新协作者的最小须知，细节
   panic。改 `.proto` 后必须重新生成 `*.pb.go` / `*_grpc.pb.go` 并提交生成物。
 * 文档分工：`AGENTS.md`（本文，精简、写"该怎么做"）、`README.md`（项目概况）、
   `DESIGN.md`（方案设计）、`BUGS.md`（问题定位与修复记录）。
-* **`BUGS.md` 顶部有「状态总览」表**：先看它判断某个问题是不是已经修过、修在哪个提交，别从头读全文。
-  当前状态：BUG-0001 / 0002 / 0003 已修复（`944b45300`）；BUG-0004（失败拨号把日志刷满）与
-  BUG-0005（monitor 连接记录字段恒为初值 + 每分钟裁剪刷日志）已定位、未修复。
+* **`BUGS.md` 顶部有「状态总览」表**：先看它判断某个问题是不是已经修过、修在哪个提交，别从头读全文
+  （本文不复述状态，容易过期）。
 * 提交前跑机器级泄漏/产物自检脚本（在本机文档仓库的 `_machine/` 下），红了不要提交。
+* **netbird 配置是独立的 `netbird-config.json`**（与 sing-box 配置同目录、分组 JSON、
+  未知键即报错）；引擎状态与规则集文件在 `<数据目录>/nb-state/`，数据目录只由 sing-box
+  配置位置推导。schema 与解析入口只有 `experimental/netbird_integration/config_file.go`，
+  用户文档在 `docs/configuration/netbird/`。引擎与 app 必须一起换：新 app + 旧引擎会让
+  netbird 静默不启动（见 BUG-0009）。

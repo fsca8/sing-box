@@ -250,19 +250,25 @@ elif [ "$CREDS_MODE" = "file" ]; then
   fi
 fi
 if [ -n "$NB_PKEY" ]; then
-  CRED_JSON="  \"private_key\": \"$NB_PKEY\","
+  CRED_JSON="\"private_key\": \"$NB_PKEY\","
 elif [ -n "$NB_SETUP" ]; then
-  CRED_JSON="  \"setup_key\": \"$NB_SETUP\","
+  CRED_JSON="\"setup_key\": \"$NB_SETUP\","
 else
   CRED_JSON=""
 fi
 cat > "$NB_CONFIG" <<EOF
 {
-  "device_name": "sing-netbird-kerneltun-test",
-$CRED_JSON
-  "management_url": "$NB_MGMT",
-  "log_level": "debug",
-  "kernel_tun": true
+  "device": {
+    "name": "sing-netbird-kerneltun-test",
+    $CRED_JSON
+    "management_url": "$NB_MGMT"
+  },
+  "network": {
+    "kernel_tun": true
+  },
+  "log": {
+    "level": "debug"
+  }
 }
 EOF
 chmod 600 "$NB_CONFIG"

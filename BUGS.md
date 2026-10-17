@@ -19,6 +19,7 @@
 | BUG-0006 | 日志上限的键名与 app 不一致导致引擎拒启动；netbird 引擎日志无上限且不在统一目录 | ✅ 已修复（未提交） | — |
 | BUG-0007 | 用户态 netstack 模式隧道 DNS 地址恒为空：带前缀长度的 peer 地址被当裸 IP 解析 | ✅ 已修复（未提交） | — |
 | BUG-0008 | `log.max_size_mb` 是 fork 独有的配置键（上游没有日志轮转）：改为固定 100MB 常量 | ✅ 已修复（未提交） | — |
+| BUG-0009 | netbird 配置：app 写的 `expose_ports` 被 run-all 丢弃、`admin_url`/`package_name`/`UnifiedConfig` 是死配置/死代码、只有私钥的配置被当成"无凭据"（重构为分组 JSON 单文件） | ✅ 已修复（未提交） | — |
 
 **状态只有三种取值**：`✅ 已修复` / `🟡 已定位、未修复` / `🔴 已知、未定位`。
 每条标题下的第一项 "状态" 写了修复提交与验证到什么程度；`grep -n "^## BUG-" BUGS.md`
@@ -579,4 +580,110 @@ BUG-0001 当时是在 0.76.3 的**内核模式**上验证的，内核模式的�
   （旧引擎把缺失的键当默认 100MB）；**旧 app + 新引擎会挂**（旧 app 会写 `max_size_mb: 5`）。
   另外换上新引擎后要让 app 重启一次，它才会把磁盘上已有的 `sing-box-config.json`
   重写成不带该键的版本。
+
+---
+
+## BUG-0009 netbird 配置：app 写的 `expose_ports` 被丢弃、死配置键与死代码、只有私钥的配置被当成"无凭据"
+
+* **状态**：✅ 已修复（未提交，未构建/未上机）。
+* **组件**：`experimental/netbird_integration/`（`config_file.go` 新增、`netbird.go`、
+  `netbird_stub.go`、`config_file_test.go` 新增、删 `testdata/unified-example.json`）、
+  `cmd/sing-box/cmd_run_all.go`、`cmd/sing-box/cmd_netbird.go`、`test-kernel-tun.sh`、
+  `docs/configuration/netbird/index.md|index.zh.md`（新增）、`mkdocs.yml`；app 侧
+  `lib/pages/profile_edit_page.dart`、`lib/services/singbox_controller.dart` 等。
+
+### 结论
+
+`netbird-config.json` 过去是**扁平键 + 一把只被部分读取的键**：app 写进去的键，引擎有的读、
+有的丢、有的根本不看；反过来引擎支持的一堆选项（MTU、PSK、Rosenpass、批量参数、DNS 标签……）
+app 里既没有 UI 也没有写入口。本次把配置文件重构成 sing-box 风格的**分组 JSON 单文件**，
+并顺手修掉四个由此暴露出来的缺陷：
+
+1. **`expose_ports` 在 run-all 路径上是死配置**：app 给 Android/Windows 都写了它，
+   引擎的 `startBridges(cfg.ExposePorts)` 却永远收到空列表。
+2. **`admin_url`、`package_name`、`data_dir` 从来没有人读**：app 一直写 `package_name`。
+3. **`UnifiedConfig` / `ReadUnifiedConfig` / `testdata/unified-example.json` 是没人调用的半成品。**
+4. **只有 `private_key` 的配置被当成"没有凭据"**，整个 netbird 集成被静默跳过。
+
+### 证据
+
+* `cmd/sing-box/cmd_run_all.go` 的 `buildNetbirdConfig` 从文件里只搬运
+  `SetupKey` / `JWTToken` / `ManagementURL` / `DeviceName` / `LogLevel` / `KernelTun` / `PrivateKey`
+  七个字段 —— `ExposePorts`（以及 `AdminURL`）被丢掉。于是：
+  * app 侧 `settings_page.dart` 为 `Platform.isAndroid || Platform.isWindows` 显示端口转发行，
+    `singbox_controller.dart` 把它写进 `expose_ports`；
+  * 引擎 `StartAll` → `startBridges(e.cfg.ExposePorts)` 里的 `cfg.ExposePorts` 恒为空；
+  * 桌面（Windows）上这条功能**完全无效**，且没有任何报错 —— 配了端口转发却连不进来。
+* `package_name`：app 写（Android 专属包名），`git grep -n package_name` 在
+  `experimental/netbird_integration/` 里只命中这条写入路径，引擎侧零读取。
+* `admin_url`：只在旧 `Config` 结构体里出现过，无任何使用点。
+* `UnifiedConfig` / `ReadUnifiedConfig`：`git grep -n 'UnifiedConfig\|ReadUnifiedConfig'` 只有
+  定义处与被删掉的 `testdata/unified-example.json`，没有任何调用者。
+* `StartAll` 的入场检查是
+  `hasCreds := cfg.SetupKey != "" || cfg.JWTToken != ""` —— 只用 `private_key`
+  （复用已有设备身份）的配置被判为无凭据，直接 `return result, nil`（sing-box 照常启动、
+  netbird 静默缺席）。
+
+### 修复
+
+* 新增 `experimental/netbird_integration/config_file.go`：唯一的配置 schema 与解析入口。
+  * 分组：`device`（`name` / `management_url` / `setup_key` / `jwt_token` / `private_key`）、
+    `network`（`kernel_tun` / `mtu` / `wireguard_port` / `disable_ipv6` /
+    `disable_client_routes` / `block_lan_access` / `block_inbound` / `nat_external_ips` /
+    `dns_labels`）、`security`（`pre_shared_key` / `rosenpass` / `rosenpass_permissive`）、
+    `lazy_connection`（三态指针）、`expose_ports`、`performance`、`log`。
+  * **严格解码**（`json.Decoder.DisallowUnknownFields`，与 sing-box 自身配置一致）：
+    未知键、类型错误、非法取值都是错误，`LoadConfigFile` 把它交回调用方。
+  * 默认值收敛到 `applyDefaults`：`sing-netbird` / `https://api.netbird.io:443` / `info`；
+    MTU 与 WireGuard 端口 `0` 表示"沿用已存/平台默认"，校验范围 `576..8192` / `1..65535`。
+  * `hasCredentials()` 把 `private_key` 与环境变量回退（`NB_SETUP_KEY` / `NB_JWT_TOKEN` /
+    `NB_PRIVATE_KEY`）一起算进来 —— 修掉上面第 4 条。
+  * 旧的扁平格式仍可解析：`legacyFlatKeys` 里的键被抬进分组结构并打一条列出键名的弃用警告，
+    分组里的值优先（半迁移的文件行为可预测）。`admin_url` / `package_name` / `data_dir`
+    额外各打一条"被忽略"的警告。**旧文件不可能把新引擎卡死在启动失败上。**
+    `expose_ports` 不在 legacy 列表里 —— 它同名同形，属于现行 schema，用新格式的文件
+    不该为它收到弃用警告。
+* `cmd/sing-box/cmd_run_all.go`：改用 `LoadConfigFile`，**整份 Config 原样使用**
+  （`ExposePorts` 由此第一次真正到达 `startBridges`）；文件不存在才回落到环境变量；
+  文件可读但不可用（未知键/非法值）时打 ERROR 并**禁用集成**（不带着被静默丢掉的选项启动，
+  也不因为一个可选子系统让整个代理进程退出）。usage 文本同步成新格式。
+* `cmd/sing-box/cmd_netbird.go`：`netbird-run` 同样走 `LoadConfigFile`，并把
+  `DataDir` 设为配置文件所在目录（与 run-all 的"数据目录由 sing-box 配置位置推导"同一规则）。
+* `netbird_stub.go`（`!with_netbird`）镜像新的分组结构，删掉 `UnifiedConfig`。
+* 规则集文件 `nb-domains.json` / `nb-cidr.json` 从数据目录根移进 **`nb-state/`**：
+  数据目录根只留用户需要看的配置文件（`sing-box-config.json`、`netbird-config.json`、
+  `profiles.json`、`logs/`），`nb-state/` 是引擎内部状态（WireGuard 密钥、peer 状态、
+  规则集），换凭据时本来就会被清空 —— 规则集跟着清掉正合期望。
+  两个 writer 都补了 `os.MkdirAll(dir, 0700)`：异步启动路径会先写规则集文件、后由 `Start()`
+  建目录。
+* 文档：新增 `docs/configuration/netbird/index.md` 与 `index.zh.md`（结构 + 字段 + 数据目录 +
+  迁移对照 + 命令行），`mkdocs.yml` 里挂到 Configuration 下。
+
+### 行为差异
+
+| 配置 | 旧引擎 | 新引擎 |
+| --- | --- | --- |
+| 扁平键（`device_name` 等） | 正常 | 正常 + 弃用警告（列出键名） |
+| `expose_ports`（桌面） | 被丢弃、功能失效、无提示 | 生效 |
+| `admin_url` / `package_name` | 静默忽略 | 警告后忽略 |
+| `data_dir` | 生效（可把状态指到别处） | 警告后忽略；数据目录只由 sing-box 配置位置决定 |
+| 只有 `private_key` | 判为无凭据、跳过 | 正常启动 |
+| 未知键 / 非法值 | 静默忽略（或按零值使用） | 报错并禁用 netbird |
+| 规则集文件位置 | 数据目录根 | `<数据目录>/nb-state/` |
+
+### 验证
+
+* `go test -tags with_netbird -count=1 ./experimental/netbird_integration/` → `ok`（新增
+  `config_file_test.go`：分组解析、未知键拒绝、类型错误、默认值、扁平格式迁移与警告、
+  `expose_ports` 不误报弃用、MTU/端口/URL/端口转发校验、`hasCredentials`（含私钥与环境变量）、
+  `LoadConfigFile` 缺文件/坏文件、`nb-state` 路径）。
+* `go vet` 两个 tag 变体（`with_netbird` / 无 tag）覆盖
+  `./experimental/netbird_integration/ ./cmd/sing-box/ ./experimental/libbox/` → 只剩两处**既有的**
+  `possible misuse of unsafe.Pointer`（`libbox/debug.go` 等，与本次改动无关）。
+* `go build -tags with_netbird ./...` 通过（无 tag 变体也通过）。
+* **未做**：没有构建产物、没有部署。上机时**引擎与 app 必须一起换**：
+  * 新引擎 + 旧 app：安全（旧 app 的扁平文件被接受并警告）；
+  * **旧 app 也不会变坏，但新 app + 旧引擎会让 netbird 静默不启动** —— 旧引擎把分组键当
+    未知字段静默忽略，于是读不到 `setup_key`、判为"无凭据"直接跳过（不报错）。
+    这是"必须一起换"的硬理由。
 

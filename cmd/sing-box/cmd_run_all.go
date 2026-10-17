@@ -15,7 +15,6 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/json"
 
 	"github.com/spf13/cobra"
 )
@@ -40,8 +39,12 @@ When --enable-netbird is true and netbird config is available:
   - Traffic to the netbird overlay CIDR goes through the netbird tunnel
 When --enable-netbird is false (default), runs sing-box only.
 
-Netbird config:
-  {"device_name":"...", "setup_key":"...", "management_url":"..."}
+Netbird config (--netbird-config, defaults to <config dir>/netbird-config.json):
+  {
+    "device":  {"name": "my-device", "management_url": "...", "setup_key": "..."},
+    "network": {"mtu": 1280, "kernel_tun": false},
+    "expose_ports": [{"port": 8022, "target": "127.0.0.1:8022"}]
+  }
 `,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runAll(); err != nil {
@@ -186,49 +189,45 @@ func runAllEngines(cfgPath string) (func(), error) {
 	return cleanup, nil
 }
 
+// buildNetbirdConfig loads the netbird engine config for this process.
+//
+// The config file is the documented configuration surface and wins over the
+// environment; the NB_* variables are the fallback for a run without a file
+// (and credentials may always be supplied by NB_SETUP_KEY / NB_JWT_TOKEN /
+// NB_PRIVATE_KEY, see DeviceOptions). The data directory is never read from
+// the file: it is the directory of the sing-box config, so both engines always
+// agree on where state lives.
+//
+// Returns nil when a config file exists but cannot be used: netbird is then
+// disabled with a loud error instead of starting with silently dropped
+// options — that failure mode is exactly what this format exists to prevent.
 func buildNetbirdConfig(cfgPath string) *netbird_integration.Config {
-	// Derive data directory from the sing-box config file's location
 	dataDir := filepath.Dir(cfgPath)
-	cfg := &netbird_integration.Config{
-		DeviceName:    envOrDefault("NB_DEVICE_NAME", "sing-netbird"),
-		SetupKey:      os.Getenv("NB_SETUP_KEY"),
-		JWTToken:      os.Getenv("NB_JWT_TOKEN"),
-		ManagementURL: envOrDefault("NB_MANAGEMENT_URL", "https://api.netbird.io:443"),
-		LogLevel:      envOrDefault("NB_LOG_LEVEL", "info"),
-		DataDir:       dataDir,
+	envCfg := &netbird_integration.Config{
+		Device: netbird_integration.DeviceOptions{
+			Name:          envOrDefault("NB_DEVICE_NAME", "sing-netbird"),
+			ManagementURL: envOrDefault("NB_MANAGEMENT_URL", "https://api.netbird.io:443"),
+			SetupKey:      os.Getenv("NB_SETUP_KEY"),
+			JWTToken:      os.Getenv("NB_JWT_TOKEN"),
+			PrivateKey:    os.Getenv("NB_PRIVATE_KEY"),
+		},
+		Log:     netbird_integration.LogOptions{Level: envOrDefault("NB_LOG_LEVEL", "info")},
+		DataDir: dataDir,
 	}
-	// Try reading from --netbird-config flag, then from DataDir/netbird-config.json
+	// Try the --netbird-config flag, then <config dir>/netbird-config.json
 	nbCfgPath := runAllNetbirdConfig
 	if nbCfgPath == "" {
-		nbCfgPath = filepath.Join(cfg.DataDir, "netbird-config.json")
+		nbCfgPath = filepath.Join(dataDir, "netbird-config.json")
 	}
-	if data, err := os.ReadFile(nbCfgPath); err == nil {
-		var fileCfg netbird_integration.Config
-		if err := json.Unmarshal(data, &fileCfg); err != nil {
-			log.Warn("parse --netbird-config: ", err)
-			return cfg
+	fileCfg, err := netbird_integration.LoadConfigFile(nbCfgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Info("netbird: no config file at ", nbCfgPath, ", using the environment only")
+			return envCfg
 		}
-		if fileCfg.SetupKey != "" {
-			cfg.SetupKey = fileCfg.SetupKey
-		}
-		if fileCfg.JWTToken != "" {
-			cfg.JWTToken = fileCfg.JWTToken
-		}
-		if fileCfg.ManagementURL != "" {
-			cfg.ManagementURL = fileCfg.ManagementURL
-		}
-		if fileCfg.DeviceName != "" {
-			cfg.DeviceName = fileCfg.DeviceName
-		}
-		if fileCfg.LogLevel != "" {
-			cfg.LogLevel = fileCfg.LogLevel
-		}
-		if fileCfg.KernelTun {
-			cfg.KernelTun = true
-		}
-		if fileCfg.PrivateKey != "" {
-			cfg.PrivateKey = fileCfg.PrivateKey
-		}
+		log.Error("netbird: ", err, " — netbird is disabled until the config is fixed")
+		return nil
 	}
-	return cfg
+	fileCfg.DataDir = dataDir
+	return fileCfg
 }
