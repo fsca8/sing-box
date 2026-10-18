@@ -10,6 +10,9 @@ import (
 
 // HTTPHandler returns an http.Handler that serves /monitor/* endpoints.
 // Mount it under the Clash API router: r.Mount("/monitor", monitor.HTTPHandler())
+//
+// 所有数据来自内存环形缓冲：进程重启即清空，容量固定（见 Limits），写满后
+// 旧记录被覆盖，覆盖条数通过 `dropped` 字段暴露。
 func HTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/monitor")
@@ -43,11 +46,7 @@ func handleDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	since, limit := parseQuery(r)
-	records, err := c.QueryDNS(since, limit)
-	if err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
-		return
-	}
+	records := c.QueryDNS(since, limit)
 	if records == nil {
 		records = []DNSRecord{}
 	}
@@ -64,11 +63,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	since, limit := parseQuery(r)
-	records, err := c.QueryConnections(since, limit)
-	if err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
-		return
-	}
+	records := c.QueryConnections(since, limit)
 	if records == nil {
 		records = []ConnectionRecord{}
 	}
@@ -84,15 +79,11 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"error": "monitor not initialized"})
 		return
 	}
-	upload, download, err := c.QueryStats()
-	if err != nil {
-		writeJSON(w, map[string]string{"error": err.Error()})
-		return
-	}
+	upload, download := c.QueryStats()
 	writeJSON(w, map[string]interface{}{
 		"upload_bytes":   upload,
 		"download_bytes": download,
-		"dropped":        c.DroppedRecords(),
+		"dropped":        c.OverwrittenRecords(),
 	})
 }
 
@@ -100,14 +91,20 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	c := Get()
 	status := "ok"
 	dropped := int64(0)
+	dnsRecords, connRecords, dnsCapacity, connCapacity := 0, 0, 0, 0
 	if c == nil {
 		status = "not_initialized"
 	} else {
-		dropped = c.DroppedRecords()
+		dropped = c.OverwrittenRecords()
+		dnsRecords, connRecords, dnsCapacity, connCapacity = c.RingStats()
 	}
 	writeJSON(w, map[string]interface{}{
-		"status":  status,
-		"dropped": dropped,
+		"status":        status,
+		"dropped":       dropped,
+		"dns_records":   dnsRecords,
+		"connections":   connRecords,
+		"dns_capacity":  dnsCapacity,
+		"conn_capacity": connCapacity,
 	})
 }
 

@@ -10,26 +10,30 @@ type ExperimentalOptions struct {
 	Monitor   *MonitorOptions   `json:"monitor,omitempty"`
 }
 
-// MonitorOptions configures the built-in monitoring collector (monitor.db).
-// Every field is optional: 0 keeps the default, a negative value disables the
-// corresponding cap, a positive value overrides it.
+// MonitorOptions configures the built-in monitoring collector.
+//
+// 采集数据只留在内存环形缓冲里（不写数据库）：容量决定的是"最新的记录能倒推
+// 到多久以前"，进程退出即清空。0 表示用默认值。
 type MonitorOptions struct {
-	// MaxSizeMB caps the on-disk size of monitor.db. Defaults to 100 MB.
-	// Oldest records are removed first when the cap is reached.
-	MaxSizeMB int `json:"max_size_mb,omitempty"`
-	// MaxDNSRows caps how many DNS records are kept (default 200000).
+	// MaxDNSRows 是 DNS 环形缓冲的容量（默认 2000）。
 	MaxDNSRows int `json:"max_dns_rows,omitempty"`
-	// MaxConnRows caps how many connection records are kept (default 100000).
+	// MaxConnRows 是连接环形缓冲的容量（默认 1000）。
 	MaxConnRows int `json:"max_conn_rows,omitempty"`
-	// RetentionDays deletes records older than N days on startup (default 7).
-	RetentionDays int `json:"retention_days,omitempty"`
 	// FailDedupeSec 是失败记录的合并窗口：窗口内对同一目的地（连接侧看
-	// remote+outbound，DNS 侧看 domain+qtype+status）的重复失败只落库第一条。
-	// 一次上游故障会在短时间内产生成片失败记录，正是它们顶满了行数上限。
-	// 默认 60 秒；负值关闭去重（每条失败都落库）。
+	// remote+outbound，DNS 侧看 domain+qtype+status）的重复失败只记第一条。
+	// 一次上游故障会在短时间内产生成片失败记录，正是它们把有用的历史挤出环外。
+	// 默认 60 秒；负值关闭去重（每条失败都记录）。
 	FailDedupeSec int `json:"fail_dedupe_sec,omitempty"`
-	// MaintenanceLogSec 是两行裁剪日志之间的最小间隔（默认 600 秒）；
-	// 被节流掉的裁剪会累计，到下一次输出时一并交代。负值不节流，即每次裁剪都输出。
+
+	// 以下三项目前只被接受、不生效（落库时代的键）。experimental 是严格解码，
+	// 删掉 JSON 键会让带这些键的旧配置直接启动失败，所以保留字段；引擎启动时
+	// 会提示一次"已忽略"。
+	//
+	// MaxSizeMB capped the on-disk size of monitor.db. Deprecated and ignored.
+	MaxSizeMB int `json:"max_size_mb,omitempty"`
+	// RetentionDays deleted records older than N days. Deprecated and ignored.
+	RetentionDays int `json:"retention_days,omitempty"`
+	// MaintenanceLogSec throttled prune logs. Deprecated and ignored.
 	MaintenanceLogSec int `json:"maintenance_log_sec,omitempty"`
 }
 

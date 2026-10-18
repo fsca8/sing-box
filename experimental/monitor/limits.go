@@ -3,150 +3,98 @@ package monitor
 
 import "time"
 
-// Defaults for the growth caps applied to monitor.db.
+// monitor 的数据全部留在内存里：两个定容环形缓冲，写满后覆盖最旧的记录。
+// 不写数据库，也就不需要体积上限、保留期和周期裁剪这些机制——进程退出即
+// 清空，磁盘上不会留下任何监控数据（旧版本留下的 monitor.db 由
+// RemoveLegacyDatabase 在启动时删掉）。
 //
-// The database used to grow without bound (a 6.5 GB monitor.db was observed in
-// production). The caps are configurable through the sing-box config file:
+// 可配置项（`experimental.monitor`，全部可选）：
 //
 //	"experimental": {
 //	  "monitor": {
-//	    "max_size_mb": 100,      // cap on the on-disk size (default 100)
-//	    "max_dns_rows": 200000,  // row caps, size-independent guard
-//	    "max_conn_rows": 100000,
-//	    "retention_days": 7,     // time-based retention, applied on startup
-//	    "fail_dedupe_sec": 60,   // failure dedup window (default 60)
-//	    "maintenance_log_sec": 600 // prune log throttle (default 600)
+//	    "max_dns_rows": 2000,   // DNS 环容量（默认 2000）
+//	    "max_conn_rows": 1000,  // 连接环容量（默认 1000）
+//	    "fail_dedupe_sec": 60   // 失败合并窗口（默认 60 秒，负值关闭去重）
 //	  }
 //	}
+//
+// max_size_mb / retention_days / maintenance_log_sec 是落库时代的键。引擎用严格
+// 解码，删掉这些键会让带它们的旧配置直接启动失败，所以保留为"接受但忽略",
+// 并在启动时提示一次（见 cmd/sing-box/cmd_run.go）。
 const (
-	// DefaultMaxSizeBytes caps the on-disk database size (main file + WAL).
-	DefaultMaxSizeBytes int64 = 100 << 20
-	// DefaultMaxDNSRows / DefaultMaxConnRows cap the rows kept per table so a
-	// single burst of tiny (or huge) records cannot blow past the size cap
-	// between two maintenance passes.
-	DefaultMaxDNSRows  = 200000
-	DefaultMaxConnRows = 100000
-	// DefaultRetentionDays deletes records older than this on startup.
-	DefaultRetentionDays = 7
-	// DefaultMaintenanceInterval is how often the caps are enforced at runtime.
-	DefaultMaintenanceInterval = time.Minute
+	// DefaultDNSRingSize / DefaultConnRingSize 是环的默认容量。app 单次最多只
+	// 翻 1000 条（monitorMaxWindow），所以容量决定的是「最新的那些记录能倒推
+	// 到多久以前」，而不是"能看到多少行"。
+	DefaultDNSRingSize  = 2000
+	DefaultConnRingSize = 1000
+
+	// 防御性上限：配置里多写几个 0 不至于把内存吃光（按平均每条 DNS 约
+	// 350B、连接约 400B 估算，5 万条 DNS 约 17MB，2 万条连接约 8MB）。
+	maxDNSRingSize  = 50000
+	maxConnRingSize = 20000
+
 	// DefaultFailDedupeWindow 是失败记录的合并窗口：上游故障/重试风暴会在
-	// 短时间对同一目标产生成片失败记录，一次故障就能顶满行数上限。
+	// 短时间内对同一目标产生成片失败记录。环同样会被这种风暴冲刷（把有用的
+	// 历史挤掉），所以去重依然必要。
 	DefaultFailDedupeWindow = time.Minute
-	// DefaultMaintenanceLogInterval 是两行裁剪日志之间的最小间隔：维护每分钟
-	// 跑一次，但"又裁了多少行"这件事一小时看一次就够了。
-	DefaultMaintenanceLogInterval = 10 * time.Minute
 )
 
-// Limits caps the growth of the monitor database. All fields are optional:
-// the zero value means "use the default", and a negative value disables that
-// particular cap (see LimitsFrom for the config-mapping rules).
+// Limits 是采集层的容量参数。零值表示"用默认值"。
 type Limits struct {
-	// MaxSizeBytes caps the on-disk size of the database (0 disables).
-	MaxSizeBytes int64
-	// MaxDNSRows / MaxConnRows cap the number of rows kept per table
-	// (0 disables). Oldest rows are dropped first.
+	// MaxDNSRows / MaxConnRows 是 DNS / 连接环形缓冲的容量。0 或负值都用默认
+	// 值——环形缓冲必须有界，不存在"关闭上限"；正数会被防御性上限截断。
 	MaxDNSRows  int
 	MaxConnRows int
-	// RetentionDays deletes records older than N days (0 disables). Applied on
-	// startup only.
-	RetentionDays int
-	// MaintenanceInterval overrides DefaultMaintenanceInterval.
-	MaintenanceInterval time.Duration
-	// FailDedupeWindow 之内的重复失败（同一 remote+outbound，或同一
-	// domain+qtype+status）只落库第一条（0 用默认值，负值关闭去重）。
+	// FailDedupeWindow 之内的重复失败（连接侧同一 remote+outbound，DNS 侧同一
+	// domain+qtype+status）只记第一条（0 用默认值，负值关闭去重）。
 	FailDedupeWindow time.Duration
-	// MaintenanceLogInterval 节流裁剪日志：窗口内的裁剪只累计不输出
-	// （0 用默认值，负值不节流，即每次裁剪都输出）。
-	MaintenanceLogInterval time.Duration
 }
 
-// DefaultLimits returns the built-in caps (100 MB / 200k DNS / 100k conn / 7d).
+// DefaultLimits returns the built-in ring sizes (DNS 2000 / conn 1000) and the
+// default failure-dedupe window (60s).
 func DefaultLimits() Limits {
 	return Limits{
-		MaxSizeBytes:           DefaultMaxSizeBytes,
-		MaxDNSRows:             DefaultMaxDNSRows,
-		MaxConnRows:            DefaultMaxConnRows,
-		RetentionDays:          DefaultRetentionDays,
-		MaintenanceInterval:    DefaultMaintenanceInterval,
-		FailDedupeWindow:       DefaultFailDedupeWindow,
-		MaintenanceLogInterval: DefaultMaintenanceLogInterval,
+		MaxDNSRows:       DefaultDNSRingSize,
+		MaxConnRows:      DefaultConnRingSize,
+		FailDedupeWindow: DefaultFailDedupeWindow,
 	}
 }
 
-// LimitsFrom builds Limits from configuration values (the
-// `experimental.monitor` block). For every value: 0 keeps the default,
-// a negative value disables that cap, a positive value overrides it.
-// failDedupeSec / maintenanceLogSec are given in seconds.
-func LimitsFrom(maxSizeMB, maxDNSRows, maxConnRows, retentionDays, failDedupeSec, maintenanceLogSec int) Limits {
+// LimitsFrom 把 `experimental.monitor` 的配置值映射成环参数：0 用默认，负值也
+// 用默认（环不能无界），正数覆盖默认值并被防御性上限截断；failDedupeSec 为负
+// 表示关闭失败去重。
+func LimitsFrom(maxDNSRows, maxConnRows, failDedupeSec int) Limits {
 	limits := DefaultLimits()
-	if maxSizeMB != 0 {
-		if maxSizeMB < 0 {
-			limits.MaxSizeBytes = -1
-		} else {
-			limits.MaxSizeBytes = int64(maxSizeMB) << 20
-		}
+	if maxDNSRows > 0 {
+		limits.MaxDNSRows = maxDNSRows
 	}
-	if maxDNSRows != 0 {
-		if maxDNSRows < 0 {
-			limits.MaxDNSRows = -1
-		} else {
-			limits.MaxDNSRows = maxDNSRows
-		}
+	if maxConnRows > 0 {
+		limits.MaxConnRows = maxConnRows
 	}
-	if maxConnRows != 0 {
-		if maxConnRows < 0 {
-			limits.MaxConnRows = -1
-		} else {
-			limits.MaxConnRows = maxConnRows
-		}
-	}
-	if retentionDays != 0 {
-		if retentionDays < 0 {
-			limits.RetentionDays = -1
-		} else {
-			limits.RetentionDays = retentionDays
-		}
-	}
-	if failDedupeSec != 0 {
-		if failDedupeSec < 0 {
-			limits.FailDedupeWindow = -1
-		} else {
-			limits.FailDedupeWindow = time.Duration(failDedupeSec) * time.Second
-		}
-	}
-	if maintenanceLogSec != 0 {
-		if maintenanceLogSec < 0 {
-			limits.MaintenanceLogInterval = -1
-		} else {
-			limits.MaintenanceLogInterval = time.Duration(maintenanceLogSec) * time.Second
-		}
+	if failDedupeSec < 0 {
+		limits.FailDedupeWindow = -1
+	} else if failDedupeSec > 0 {
+		limits.FailDedupeWindow = time.Duration(failDedupeSec) * time.Second
 	}
 	return limits
 }
 
-// withDefaults fills the zero-valued fields with their defaults.
+// withDefaults 填上零值字段并做防御性截断；构造环之前调用一次。
 func (l Limits) withDefaults() Limits {
-	if l.MaxSizeBytes == 0 {
-		l.MaxSizeBytes = DefaultMaxSizeBytes
+	if l.MaxDNSRows <= 0 {
+		l.MaxDNSRows = DefaultDNSRingSize
 	}
-	if l.MaxDNSRows == 0 {
-		l.MaxDNSRows = DefaultMaxDNSRows
+	if l.MaxConnRows <= 0 {
+		l.MaxConnRows = DefaultConnRingSize
 	}
-	if l.MaxConnRows == 0 {
-		l.MaxConnRows = DefaultMaxConnRows
+	if l.MaxDNSRows > maxDNSRingSize {
+		l.MaxDNSRows = maxDNSRingSize
 	}
-	if l.RetentionDays == 0 {
-		l.RetentionDays = DefaultRetentionDays
-	}
-	if l.MaintenanceInterval <= 0 {
-		l.MaintenanceInterval = DefaultMaintenanceInterval
+	if l.MaxConnRows > maxConnRingSize {
+		l.MaxConnRows = maxConnRingSize
 	}
 	if l.FailDedupeWindow == 0 {
 		l.FailDedupeWindow = DefaultFailDedupeWindow
-	}
-	if l.MaintenanceLogInterval == 0 {
-		l.MaintenanceLogInterval = DefaultMaintenanceLogInterval
 	}
 	return l
 }

@@ -319,6 +319,13 @@ if IsKernelMode() { ReconcileKernelRoute(ExtractNetworkCIDR(resp)) }
 ## BUG-0005 monitor 连接记录只记"打开"半边：`dest_port` 恒为 0、字节与关闭状态永不落库，还每分钟裁剪刷日志（已修复）
 
 * **状态**：✅ 已修复（提交 `8d6dc2971`）。单测覆盖；上机核对脚本已就位，**尚未在线上产物上复核**。
+* **后续变更**（本提交）：monitor 改为两个内存环形缓冲（DNS 2000 / 连接 1000），不再写数据库。
+  于是本节里与落库绑定的部分失效——行数上限、体积上限、`retention_days`、每分钟裁剪日志都已
+  随库一起删除（`max_size_mb` / `retention_days` / `maintenance_log_sec` 保留为"接受但忽略"，
+  否则带这些键的旧配置会因严格解码启动失败），"字节与关闭状态永不落库"换成"永不进环"，
+  但本节的修复本身（失败合并、字段补全、失败即关闭记录）继续有效。`dropped` 的语义从
+  "被上限裁掉的行"变成"被环覆盖的记录"；历史改为会话级，进程重启即清空，旧 `monitor.db`
+  在首次启动时删除。
 * **组件**：`experimental/monitor`（`collector.go`、`database.go`、`maintenance.go`、`limits.go`），
   接线在 `cmd/sing-box/cmd_run.go`、`option/experimental.go`。
 * **现象**（实测某网关上库贴着上限时的统计）：

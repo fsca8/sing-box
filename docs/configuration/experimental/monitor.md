@@ -4,41 +4,44 @@
 
 ```json
 {
-  "max_size_mb": 100,
-  "max_dns_rows": 200000,
-  "max_conn_rows": 100000,
-  "retention_days": 7
+  "max_dns_rows": 2000,
+  "max_conn_rows": 1000,
+  "fail_dedupe_sec": 60
 }
 ```
 
 ### Fields
 
-All fields are optional: `0` keeps the default, a negative value disables that cap, a positive value
-overrides it.
+All fields are optional: `0` keeps the default, a positive value overrides it.
 
-#### max_size_mb
+Records are kept **in memory only** — two fixed-size ring buffers, no database file. Nothing is
+written to disk, and the history is empty again after a restart. Once a ring is full the oldest
+record is overwritten; how many records were overwritten is reported as `dropped` by
+`/monitor/stats` and `/monitor/health`.
 
-Maximum size of the monitoring database (`monitor.db`) in megabytes.
-
-When the cap is reached the oldest records are deleted first — both by the periodic maintenance pass
-and by SQLite itself, which refuses to grow the file past the cap even during a write burst.
-
-`100` is used by default (100 MB); a negative value disables the cap.
+A client reads at most 1000 records at a time, so the ring capacity decides how far back the
+newest records reach — not how many records exist.
 
 #### max_dns_rows
 
-Maximum number of DNS records kept in the monitoring database.
-
-Oldest records are dropped first. `200000` is used by default; a negative value disables the cap.
+Number of DNS records kept in memory. `2000` is used by default. `0` and negative values use the
+default (a ring buffer must be bounded); values above `50000` are clamped to `50000`.
 
 #### max_conn_rows
 
-Maximum number of connection records kept in the monitoring database.
+Number of connection records kept in memory. `1000` is used by default. `0` and negative values use
+the default; values above `20000` are clamped to `20000`.
 
-Oldest records are dropped first. `100000` is used by default; a negative value disables the cap.
+#### fail_dedupe_sec
 
-#### retention_days
+Window for merging repeated failures: within the window, repeated failures for the same
+destination (connections: `remote` + `outbound`; DNS: `domain` + `qtype` + `status`) are recorded
+only once.
 
-Delete records older than this many days when the service starts.
+A single upstream outage produces a burst of failures, and those bursts are what flush useful
+history out of the ring. `60` is used by default; a negative value disables deduplication.
 
-`7` is used by default; a negative value disables time-based retention.
+#### Deprecated fields
+
+`max_size_mb`, `retention_days` and `maintenance_log_sec` configured the on-disk database. They are
+still accepted — so existing configuration files keep working — but they no longer have any effect.

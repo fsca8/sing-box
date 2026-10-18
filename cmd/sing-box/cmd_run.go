@@ -163,29 +163,30 @@ func create(options option.Options) (*box.Box, context.CancelFunc, error) {
 			closeMonitor(startCtx)
 		}
 	}()
-	// Initialize monitor BEFORE service starts so hooks catch startup DNS/TCP/TLS
+	// Initialize monitor BEFORE service starts so hooks catch startup DNS/TCP/TLS.
+	// 记录只留在内存环形缓冲里，不再写库；旧版本留下的 monitor.db 在这里删掉，
+	// 把空间还回去（历史上见过几 GB 的库文件）。
 	monitorDir := workingDir
 	if monitorDir == "" {
 		monitorDir = "."
 	}
-	monitorDB := filepath.Join(monitorDir, "monitor.db")
+	if removed := monitor.RemoveLegacyDatabase(monitorDir); removed != "" {
+		log.Info("monitor: ", removed)
+	}
 	monitorLimits := monitor.DefaultLimits()
 	if options.Experimental != nil && options.Experimental.Monitor != nil {
 		monitorOptions := options.Experimental.Monitor
 		monitorLimits = monitor.LimitsFrom(
-			monitorOptions.MaxSizeMB,
 			monitorOptions.MaxDNSRows,
 			monitorOptions.MaxConnRows,
-			monitorOptions.RetentionDays,
 			monitorOptions.FailDedupeSec,
-			monitorOptions.MaintenanceLogSec,
 		)
+		if monitorOptions.MaxSizeMB != 0 || monitorOptions.RetentionDays != 0 || monitorOptions.MaintenanceLogSec != 0 {
+			log.Warn("monitor: max_size_mb / retention_days / maintenance_log_sec are deprecated and ignored (monitor no longer uses a database)")
+		}
 	}
-	if _, err := monitor.NewCollectorWithLimits(monitorDB, monitorLimits); err != nil {
-		log.Warn("monitor: ", err)
-	} else {
-		log.Info("monitor collector started, db: ", monitorDB)
-	}
+	log.Info("monitor collector started (in-memory rings: dns=", monitorLimits.MaxDNSRows, ", conn=", monitorLimits.MaxConnRows, ")")
+	monitor.NewCollectorWithLimits(monitorLimits)
 
 	err = instance.Start()
 	finishStart()
@@ -233,8 +234,8 @@ func run() error {
 			go closeMonitor(closeCtx)
 			err = instance.Close()
 			closed()
-			// 关闭监控（SQLite 写入协程 + 库句柄）：重载会重建 collector，
-			// 不关旧的每次 SIGHUP 都会多留一套。
+			// 清掉全局 collector（数据只在内存里，没有需要落盘的收尾工作）：
+			// 重载会重建 collector，旧的那套直接交给 GC。
 			if closeErr := monitor.Close(); closeErr != nil {
 				log.Warn("monitor: close failed: ", closeErr)
 			}

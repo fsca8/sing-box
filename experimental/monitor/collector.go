@@ -3,23 +3,30 @@ package monitor
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
+// Collector 把所有监控数据留在内存里：
+//
+//   - dns 是 DNS 记录的环形缓冲（值语义，只追加）；
+//   - conns 是连接记录的环形缓冲，存的是指针——一条连接的信息由 TCP 拨号、
+//     TLS 握手、流量同步、连接关闭四条路径先后补全，必须落在同一条记录上；
+//   - connIndex 按连接 key 索引同一批指针，让上面的更新是 O(1)，并且与环保持
+//     同样的淘汰顺序（环覆盖掉一条，索引也会随容量淘汰它，更新则新建一条记录，
+//     这正是"这条连接已经不在历史里"应有的行为）。
+//
+// 所有字段都由 c.mu 保护；环自己不加锁（见 ringbuf.go）。
 type Collector struct {
-	mu      sync.RWMutex
-	dnsBuf  *RingBuffer[DNSRecord]
-	connBuf *RingBuffer[ConnectionRecord]
-	db      *Database
-	connMap map[string]*ConnectionRecord // remote addr → pending connection
-	// connOrder 记录 connMap 的插入顺序，用于按 maxConnMapEntries 淘汰最旧的条目：
-	// connMap 是"连接建立→关闭"之间的匹配表，关闭链路目前不保证被调用，
-	// 不设上限会在长期运行的网关上无界增长。
-	connOrder []string
+	mu        sync.RWMutex
+	dns       *recordRing[DNSRecord]
+	conns     *recordRing[*ConnectionRecord]
+	connIndex map[string]*ConnectionRecord // key → pending/recent connection
+	connOrder []string                     // connIndex 的插入顺序，用于淘汰
+	// maxIndexEntries 略大于连接环容量：还在环里的记录一定还能被后续事件更新到。
+	maxIndexEntries int
 	// failConn / failDNS 抑制窗口内成片重复的失败记录（见 failDedupe）。
 	// 两侧分开一个实例，键的构成不同（连接是 remote|outbound，DNS 是
 	// domain|qtype|status），混在一起也没有好处。都由 c.mu 保护。
@@ -29,27 +36,26 @@ type Collector struct {
 	now func() time.Time
 	// eventCB 用 atomic 存：热路径（DNS/dial goroutine）读，Kotlin 侧随时可设。
 	eventCB atomic.Pointer[func(string)] // callback to push JSON to Android
+	// overwritten 统计被环覆盖掉的记录数（界面上显示为 dropped）。
+	overwritten atomic.Int64
+	limits      Limits
 }
 
 // globalCollector 用 atomic 存指针：Get() 在数据面热路径调用，
 // 与 NewCollectorWithLimits 的写入是并发关系。
 var globalCollector atomic.Pointer[Collector]
 
-// maxConnMapEntries 内存中待匹配连接表的上限（超出按插入顺序淘汰最旧的一批）。
-const maxConnMapEntries = 4096
-
 // maxFailDedupeEntries 是失败去重表的上限：上游故障/重试风暴会在短时间对同一
 // 目标产生成片失败记录，但长期运行的目标又会不断更换，表本身同样要有上限。
 const maxFailDedupeEntries = 4096
 
-// failDedupe 只回答一个问题：窗口内重复的同键失败，这次还要不要落库。
-// 它不碰 ring buffer，也不碰事件推送——那两条路径必须照旧。
+// failDedupe 只回答一个问题：窗口内重复的同键失败，这次还要不要记。
 // 键由调用方拼，调用者需自行保证并发安全（Collector 用 c.mu）。
 type failDedupe struct {
 	window time.Duration
 	seen   map[string]time.Time
 	// order 记录入表顺序，用于按 maxFailDedupeEntries 淘汰最旧的条目，
-	// 写法与 connMap/connOrder 一致。
+	// 写法与 connIndex/connOrder 一致。
 	order []failEntry
 }
 
@@ -62,7 +68,7 @@ func newFailDedupe(window time.Duration) *failDedupe {
 	return &failDedupe{window: window, seen: make(map[string]time.Time)}
 }
 
-// allow 判断这次失败是否要落库：窗口内同一个键只放行第一条。
+// allow 判断这次失败是否要记：窗口内同一个键只放行第一条。
 // window <= 0 表示关闭去重；nil 接收者（手工构造的 Collector）一律放行。
 func (f *failDedupe) allow(key string, now time.Time) bool {
 	if f == nil || f.window <= 0 {
@@ -97,68 +103,92 @@ func (c *Collector) nowFn() time.Time {
 	return c.now()
 }
 
-// NewCollector creates the collector with the default growth caps
-// (100 MB / 200k DNS rows / 100k connection rows / 7 days).
-func NewCollector(dbPath string) (*Collector, error) {
-	return NewCollectorWithLimits(dbPath, DefaultLimits())
+// NewCollector creates the collector with the default ring sizes
+// (DNS 2000 / connections 1000).
+func NewCollector() *Collector {
+	return NewCollectorWithLimits(DefaultLimits())
 }
 
-// NewCollectorWithLimits creates the collector with explicit growth caps
-// (see LimitsFrom for the config file mapping).
-func NewCollectorWithLimits(dbPath string, limits Limits) (*Collector, error) {
+// NewCollectorWithLimits creates the collector with explicit ring sizes
+// (see LimitsFrom for the config-file mapping).
+func NewCollectorWithLimits(limits Limits) *Collector {
 	limits = limits.withDefaults()
-	dir := filepath.Dir(dbPath)
-	os.MkdirAll(dir, 0755)
-
-	db, err := NewDatabaseWithLimits(dbPath, limits)
-	if err != nil {
-		return nil, err
-	}
 
 	c := &Collector{
-		dnsBuf:   NewRingBuffer[DNSRecord](500),
-		connBuf:  NewRingBuffer[ConnectionRecord](200),
-		db:       db,
-		connMap:  make(map[string]*ConnectionRecord),
-		failConn: newFailDedupe(limits.FailDedupeWindow),
-		failDNS:  newFailDedupe(limits.FailDedupeWindow),
-		now:      time.Now,
+		dns:             newRecordRing[DNSRecord](limits.MaxDNSRows),
+		conns:           newRecordRing[*ConnectionRecord](limits.MaxConnRows),
+		connIndex:       make(map[string]*ConnectionRecord),
+		maxIndexEntries: limits.MaxConnRows * 2,
+		failConn:        newFailDedupe(limits.FailDedupeWindow),
+		failDNS:         newFailDedupe(limits.FailDedupeWindow),
+		now:             time.Now,
+		limits:          limits,
 	}
-	// 重载时替换全局 collector：先把旧的关掉，避免泄漏库句柄与写入协程。
-	if old := globalCollector.Swap(c); old != nil {
-		_ = old.Close()
+	if c.maxIndexEntries < 256 {
+		c.maxIndexEntries = 256
 	}
-	return c, nil
+	// 重载时替换全局 collector：旧的在内存里，不需要收尾，直接换掉即可。
+	globalCollector.Swap(c)
+	return c
 }
 
 func Get() *Collector {
 	return globalCollector.Load()
 }
 
-// Close 关闭全局 collector（进程退出/配置重载前调用），并清空全局指针。
-// 不调用它的话：SQLite 写入协程与连接池会一直留着，重载还会再开一个库句柄。
+// Close 清空全局 collector（进程退出/配置重载前调用）。数据都在内存里，
+// 没有需要落盘或收尾的东西。
 func Close() error {
-	collector := globalCollector.Swap(nil)
-	if collector == nil {
-		return nil
-	}
-	return collector.Close()
+	globalCollector.Swap(nil)
+	return nil
 }
 
-// putConnLocked 写入 connMap 并维持上限，调用者必须已持有写锁。
+// Limits 返回采集层实际生效的容量（已填默认值并截断）。
+func (c *Collector) Limits() Limits {
+	return c.limits
+}
+
+// Close 释放采集器。数据都在内存里，没有句柄或写协程需要收尾，这里只是为了
+// 与落库时代的方法集保持兼容。
+func (c *Collector) Close() error {
+	return nil
+}
+
+// putConnLocked 写入 connIndex 并维持上限，调用者必须已持有写锁。
 func (c *Collector) putConnLocked(key string, conn *ConnectionRecord) {
-	if _, exists := c.connMap[key]; !exists {
+	if _, exists := c.connIndex[key]; !exists {
 		c.connOrder = append(c.connOrder, key)
 	}
-	c.connMap[key] = conn
-	for len(c.connOrder) > maxConnMapEntries {
-		delete(c.connMap, c.connOrder[0])
+	c.connIndex[key] = conn
+	for len(c.connOrder) > c.maxIndexEntries {
+		delete(c.connIndex, c.connOrder[0])
 		c.connOrder = c.connOrder[1:]
 	}
 	// connOrder 反复切片后底层数组会一直挂着，积到一定量就搬一次家。
-	if cap(c.connOrder) > 4*maxConnMapEntries && len(c.connOrder) < 2*maxConnMapEntries {
+	if cap(c.connOrder) > 4*c.maxIndexEntries && len(c.connOrder) < 2*c.maxIndexEntries {
 		c.connOrder = append([]string(nil), c.connOrder...)
 	}
+}
+
+// pushConnLocked 把一条连接记录放进历史环，调用者必须已持有写锁。
+func (c *Collector) pushConnLocked(conn *ConnectionRecord) {
+	if c.conns.push(conn) {
+		c.overwritten.Add(1)
+	}
+}
+
+// closeRecordOnFailure 记下失败的结局：拨号失败就是这条连接的终局，否则这些
+// 记录会永远停在"进行中"，时间线里看不到失败。
+func closeRecordOnFailure(conn *ConnectionRecord) {
+	latencyUs := conn.TCPLatencyUs
+	if conn.TLSLatencyUs > latencyUs {
+		latencyUs = conn.TLSLatencyUs
+	}
+	durationMs := latencyUs / 1000
+	endTime := conn.StartTime + durationMs
+	conn.Closed = true
+	conn.DurationMs = &durationMs
+	conn.EndTime = &endTime
 }
 
 func (c *Collector) SetEventCallback(cb func(string)) {
@@ -182,19 +212,16 @@ func (c *Collector) pushJSON(v any) {
 func (c *Collector) RecordDNS(r DNSRecord) {
 	r.Timestamp = nowMs()
 	c.mu.Lock()
-	c.dnsBuf.Push(r)
-	// 失败的解析在故障期间会成片重复，只让窗口内的第一条落库；
-	// 缓冲区与事件推送照旧，界面上的实时流水不受影响。
-	writeRecord := true
+	// 失败的解析在故障期间会成片重复：窗口内只留第一条，不然环会被这类记录
+	// 冲刷掉。非 ERROR 的结果一律照记。
+	write := true
 	if r.Status == "ERROR" {
-		writeRecord = c.failDNS.allow(dnsFailKey(r), c.nowFn())
+		write = c.failDNS.allow(dnsFailKey(r), c.nowFn())
+	}
+	if write && c.dns.push(r) {
+		c.overwritten.Add(1)
 	}
 	c.mu.Unlock()
-
-	// Async SQLite write (non-blocking)
-	if c.db != nil && writeRecord {
-		c.db.WriteDNS(&r)
-	}
 
 	ev := Event{Type: "dns", Timestamp: r.Timestamp, DNS: &r}
 	c.pushJSON(ev)
@@ -226,25 +253,15 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 		key = r.ConnID
 	}
 
-	// Only track in connMap for latency matching — SQLite is populated by traffic_sync
 	c.mu.Lock()
-	conn, exists := c.connMap[key]
-	if !exists {
-		conn = &ConnectionRecord{
-			ID:           key,
-			Domain:       r.Domain,
-			DestIP:       r.Remote,
-			Outbound:     r.Outbound,
-			TCPLatencyUs: r.LatencyUs,
-			StartTime:    r.Timestamp,
-			Error:        r.Error,
+	conn, exists := c.connIndex[key]
+	switch {
+	case exists:
+		// 同一条连接的重试/后续拨号：就地合并，延迟取较大值（与落库时代的
+		// ON CONFLICT ... MAX(tcp_latency_us) 一致）。
+		if r.LatencyUs > conn.TCPLatencyUs {
+			conn.TCPLatencyUs = r.LatencyUs
 		}
-		if r.ProcessPath != "" {
-			conn.ProcessPath = r.ProcessPath
-		}
-		c.putConnLocked(key, conn)
-	} else {
-		conn.TCPLatencyUs = r.LatencyUs
 		if r.Domain != "" {
 			conn.Domain = r.Domain
 		}
@@ -256,20 +273,28 @@ func (c *Collector) RecordTCP(r TCPRecord) {
 		}
 		if r.Error != "" {
 			conn.Error = r.Error
+			closeRecordOnFailure(conn)
 		}
-	}
-	// 拨号失败在故障期间会成片重复，只让窗口内的第一条落库；connMap
-	// 与事件推送照旧，热路径上的其它行为不变。
-	writeLatency := true
-	if r.Error != "" {
-		writeLatency = c.failConn.allow(connFailKey(r), c.nowFn())
+	case r.Error != "" && !c.failConn.allow(connFailKey(r), c.nowFn()):
+		// 窗口内重复的失败：不占历史（事件推送照旧）。
+	default:
+		conn = &ConnectionRecord{
+			ID:           key,
+			Domain:       r.Domain,
+			DestIP:       r.Remote,
+			Outbound:     r.Outbound,
+			TCPLatencyUs: r.LatencyUs,
+			StartTime:    r.Timestamp,
+			Error:        r.Error,
+			ProcessPath:  r.ProcessPath,
+		}
+		if r.Error != "" {
+			closeRecordOnFailure(conn)
+		}
+		c.putConnLocked(key, conn)
+		c.pushConnLocked(conn)
 	}
 	c.mu.Unlock()
-
-	// Sync latency to SQLite (per-connection INSERT, traffic_sync upserts same row by conn_id)
-	if c.db != nil && writeLatency {
-		c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, r.LatencyUs, 0, r.ProcessPath, r.Error)
-	}
 
 	ev := Event{Type: "tcp", Timestamp: r.Timestamp}
 	b, _ := json.Marshal(r)
@@ -293,29 +318,37 @@ func (c *Collector) RecordTLS(r TLSRecord) {
 		key = r.ConnID
 	}
 
-	// Find matching connection by key (same ConnID as TCP hook)
 	c.mu.Lock()
-	conn, exists := c.connMap[key]
-	if exists {
-		conn.TLSLatencyUs = r.LatencyUs
-		conn.Host = r.ServerName
-		conn.TLSVersion = r.Version
+	conn, exists := c.connIndex[key]
+	switch {
+	case exists:
+		if r.LatencyUs > conn.TLSLatencyUs {
+			conn.TLSLatencyUs = r.LatencyUs
+		}
+		if r.ServerName != "" {
+			conn.Host = r.ServerName
+		}
 		if r.Domain != "" {
 			conn.Domain = r.Domain
 		}
 		if r.Outbound != "" {
 			conn.Outbound = r.Outbound
 		}
+		if r.ProcessPath != "" {
+			conn.ProcessPath = r.ProcessPath
+		}
+		if r.Version != "" {
+			conn.TLSVersion = r.Version
+		}
+		if r.CipherSuite != "" {
+			conn.CipherSuite = r.CipherSuite
+		}
 		if r.Error != "" {
 			conn.Error = r.Error
+			closeRecordOnFailure(conn)
 		}
-		// Sync latency + host to SQLite
-		if c.db != nil {
-			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs, r.ProcessPath, r.Error)
-			c.db.WriteConnectionMeta(key, r.ServerName, "")
-		}
-	} else {
-		// TCP hook not fired yet or came from a different path — track standalone
+	case r.LatencyUs > 0 || r.Error != "":
+		// TCP hook 还没到（或走了别的路径）：单独记一条。
 		conn = &ConnectionRecord{
 			ID:           key,
 			Domain:       r.Domain,
@@ -324,17 +357,16 @@ func (c *Collector) RecordTLS(r TLSRecord) {
 			Host:         r.ServerName,
 			TLSLatencyUs: r.LatencyUs,
 			TLSVersion:   r.Version,
+			CipherSuite:  r.CipherSuite,
 			StartTime:    r.Timestamp,
 			Error:        r.Error,
+			ProcessPath:  r.ProcessPath,
 		}
-		if r.ProcessPath != "" {
-			conn.ProcessPath = r.ProcessPath
+		if r.Error != "" {
+			closeRecordOnFailure(conn)
 		}
 		c.putConnLocked(key, conn)
-		if c.db != nil {
-			c.db.WriteLatency(key, r.Remote, r.Domain, r.Outbound, 0, r.LatencyUs, r.ProcessPath, r.Error)
-			c.db.WriteConnectionMeta(key, r.ServerName, "")
-		}
+		c.pushConnLocked(conn)
 	}
 	c.mu.Unlock()
 
@@ -358,8 +390,9 @@ func (c *Collector) RecordConnection(r ConnectionRecord) {
 	}
 
 	c.mu.Lock()
-	// Merge with existing connMap entry (from RecordTCP) if present
-	if existing, ok := c.connMap[key]; ok {
+	existing, ok := c.connIndex[key]
+	if ok {
+		// Merge with the existing record (from RecordTCP) if present.
 		if existing.Host == "" {
 			existing.Host = r.Host
 		}
@@ -369,147 +402,162 @@ func (c *Collector) RecordConnection(r ConnectionRecord) {
 		if existing.StartTime == 0 {
 			existing.StartTime = r.StartTime
 		}
-		c.connBuf.Push(*existing)
-		c.mu.Unlock()
-		// Update existing SQLite row with metadata (not INSERT)
-		if c.db != nil {
-			c.db.UpdateConnectionMeta(key, r.Host, r.Outbound)
-		}
-		ev := Event{Type: "connection", Timestamp: r.StartTime, Connection: existing}
-		c.pushJSON(ev)
-		return
+	} else {
+		r.ID = key
+		existing = &r
+		c.putConnLocked(key, existing)
+		c.pushConnLocked(existing)
 	}
-	// No TCP hook entry yet — create new
-	r.ID = key
-	c.putConnLocked(key, &r)
-	c.connBuf.Push(r)
+	snapshot := *existing
 	c.mu.Unlock()
 
-	if c.db != nil {
-		c.db.WriteConnection(&r)
-	}
-
-	ev := Event{Type: "connection", Timestamp: r.StartTime, Connection: &r}
+	ev := Event{Type: "connection", Timestamp: snapshot.StartTime, Connection: &snapshot}
 	c.pushJSON(ev)
 }
 
+// CloseConnection 记下一条连接的结局（时长与字节数），按 key 找同一条记录。
 func (c *Collector) CloseConnection(id string, durationMs int64, upload, download int64) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Update in buffer
-	for i := range c.connBuf.Size() {
-		idx := (c.connBuf.head + i) % c.connBuf.cap
-		rec := &c.connBuf.buf[idx]
-		if rec.ID == id {
-			now := nowMs()
-			rec.EndTime = &now
-			dur := durationMs
-			rec.DurationMs = &dur
-			rec.UploadBytes = upload
-			rec.DownloadBytes = download
-			rec.Closed = true
-
-			// Async SQLite write (UPDATE)
-			if c.db != nil {
-				c.db.WriteConnectionClosed(rec)
-			}
-
-			ev := Event{Type: "connection_closed", Timestamp: *rec.EndTime, Connection: rec}
-			c.pushJSON(ev)
-			break
-		}
+	conn := c.findConnLocked(id)
+	if conn == nil {
+		c.mu.Unlock()
+		return
 	}
-}
-
-// CloseConnByDest marks connection closed by dest_ip key (called from route/conn.go).
-func (c *Collector) CloseConnByDest(destKey string) {
-	c.mu.Lock()
-	conn, exists := c.connMap[destKey]
-	if exists {
-		conn.Closed = true
-		now := nowMs()
-		conn.EndTime = &now
-		dur := now - conn.StartTime
-		conn.DurationMs = &dur
-		if c.db != nil {
-			c.db.WriteConnectionClosed(conn)
-		}
-	}
+	endTime := nowMs()
+	conn.EndTime = &endTime
+	conn.DurationMs = &durationMs
+	conn.UploadBytes = upload
+	conn.DownloadBytes = download
+	conn.Closed = true
+	snapshot := *conn
 	c.mu.Unlock()
 
-	// Also try to find and close by looking at connMap values
-	if !exists {
-		c.mu.Lock()
-		for _, conn := range c.connMap {
-			if conn.Host == destKey || (conn.Host == "" && conn.DestIP == destKey) {
-				conn.Closed = true
-				now := nowMs()
-				conn.EndTime = &now
-				dur := now - conn.StartTime
-				conn.DurationMs = &dur
-				if c.db != nil {
-					c.db.WriteConnectionClosed(conn)
-				}
-				break
-			}
-		}
-		c.mu.Unlock()
-	}
+	ev := Event{Type: "connection_closed", Timestamp: endTime, Connection: &snapshot}
+	c.pushJSON(ev)
+}
 
-	// Always try to mark closed in SQLite by dest_ip
-	if c.db != nil {
-		c.db.WriteConnectionClosedByDest(destKey)
+// CloseConnByDest 按目的地（dest_ip，或只有 host 时的 host）关闭记录。
+func (c *Collector) CloseConnByDest(destKey string) {
+	c.mu.Lock()
+	endTime := nowMs()
+	durationMs := int64(0)
+	for _, conn := range c.conns.newest(c.conns.len()) {
+		if conn.DestIP != destKey && conn.Host != destKey {
+			continue
+		}
+		conn.Closed = true
+		conn.EndTime = &endTime
+		conn.DurationMs = &durationMs
 	}
+	c.mu.Unlock()
+}
+
+// findConnLocked 先查索引；索引已淘汰（但记录还在环里）时扫环。
+// 调用者必须已持有锁。
+func (c *Collector) findConnLocked(id string) *ConnectionRecord {
+	if conn, ok := c.connIndex[id]; ok {
+		return conn
+	}
+	if id == "" {
+		return nil
+	}
+	for _, conn := range c.conns.newest(c.conns.len()) {
+		if conn.ID == id {
+			return conn
+		}
+	}
+	return nil
 }
 
 // ---- Query methods ----
 
+// GetDNSHistory 按「旧 → 新」返回最近 limit 条 DNS 记录。
 func (c *Collector) GetDNSHistory(limit int) []DNSRecord {
-	return c.dnsBuf.Last(limit)
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.dns.oldest(limit)
 }
 
+// GetConnectionHistory 按「旧 → 新」返回最近 limit 条连接记录。
 func (c *Collector) GetConnectionHistory(limit int) []ConnectionRecord {
-	return c.connBuf.Last(limit)
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.copyConnsLocked(c.conns.oldest(limit))
 }
 
-// ---- SQLite-backed history queries (for HTTP API) ----
-
-func (c *Collector) QueryDNS(since int64, limit int) ([]DNSRecord, error) {
-	if c.db == nil {
-		return nil, nil
+// QueryDNS 按「新 → 旧」返回 limit 条 DNS 记录（只取 timestamp 晚于 since 的；
+// since <= 0 表示不限）。
+func (c *Collector) QueryDNS(since int64, limit int) []DNSRecord {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	records := make([]DNSRecord, 0, limit)
+	for _, r := range c.dns.newest(c.dns.len()) {
+		if since > 0 && r.Timestamp <= since {
+			continue
+		}
+		records = append(records, r)
+		if len(records) >= limit {
+			break
+		}
 	}
-	return c.db.QueryDNS(since, limit)
+	return records
 }
 
-func (c *Collector) QueryConnections(since int64, limit int) ([]ConnectionRecord, error) {
-	if c.db == nil {
-		return nil, nil
+// QueryConnections 按「新 → 旧」返回 limit 条连接记录（只取 start_time 晚于
+// since 的；since <= 0 表示不限）。
+func (c *Collector) QueryConnections(since int64, limit int) []ConnectionRecord {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	records := make([]ConnectionRecord, 0, limit)
+	for _, conn := range c.conns.newest(c.conns.len()) {
+		if since > 0 && conn.StartTime <= since {
+			continue
+		}
+		records = append(records, *conn)
+		if len(records) >= limit {
+			break
+		}
 	}
-	return c.db.QueryConnections(since, limit)
+	return records
 }
 
-func (c *Collector) QueryStats() (int64, int64, error) {
-	if c.db == nil {
-		return 0, 0, nil
+// QueryStats 汇总已结束连接的上传/下载字节数。
+func (c *Collector) QueryStats() (uploadTotal, downloadTotal int64) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, conn := range c.conns.newest(c.conns.len()) {
+		if !conn.Closed {
+			continue
+		}
+		uploadTotal += conn.UploadBytes
+		downloadTotal += conn.DownloadBytes
 	}
-	return c.db.QueryStats()
+	return
 }
 
-func (c *Collector) DroppedRecords() int64 {
-	if c.db == nil {
-		return 0
-	}
-	return c.db.DroppedRecords()
+// OverwrittenRecords 返回被环覆盖掉的记录数（HTTP 上仍是 `dropped` 字段）。
+func (c *Collector) OverwrittenRecords() int64 {
+	return c.overwritten.Load()
 }
 
-// Close shuts down the database writer. Call on service shutdown.
-func (c *Collector) Close() error {
-	if c.db != nil {
-		return c.db.Close()
-	}
-	return nil
+// RingStats 返回两个环的占用与容量，供 /monitor/health 观察内存占用。
+func (c *Collector) RingStats() (dnsRecords, connRecords, dnsCapacity, connCapacity int) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.dns.len(), c.conns.len(), c.dns.capacity(), c.conns.capacity()
 }
+
+// copyConnsLocked 把指针快照复制成值，避免把还会被就地更新的记录交出去。
+// 调用者必须已持有锁。
+func (c *Collector) copyConnsLocked(conns []*ConnectionRecord) []ConnectionRecord {
+	out := make([]ConnectionRecord, 0, len(conns))
+	for _, conn := range conns {
+		out = append(out, *conn)
+	}
+	return out
+}
+
+// ---- Traffic ----
 
 // TrafficRecord holds per-connection traffic at a point in time.
 type TrafficRecord struct {
@@ -523,11 +571,53 @@ type TrafficRecord struct {
 	ProcessPath string
 }
 
-// SyncTraffic bulk-updates upload/download for active connections.
-// Called periodically from Clash API snapshot.
+// SyncTraffic 更新活跃连接的上传/下载字节数（由 Clash API 的连接快照驱动）。
+// 快照里出现但历史里没有的连接会新建一条记录。
 func (c *Collector) SyncTraffic(records []TrafficRecord) {
-	if c.db == nil || len(records) == 0 {
+	if len(records) == 0 {
 		return
 	}
-	c.db.SyncTraffic(records)
+	now := nowMs()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, tr := range records {
+		connID := tr.ConnID
+		if connID == "" {
+			connID = fmt.Sprintf("%s@%d", tr.Host, now)
+		}
+		conn, ok := c.connIndex[connID]
+		if !ok {
+			conn = &ConnectionRecord{
+				ID:            connID,
+				DestIP:        tr.DestIP,
+				UploadBytes:   tr.Upload,
+				DownloadBytes: tr.Download,
+				Outbound:      tr.Outbound,
+				Host:          tr.Host,
+				Domain:        tr.Domain,
+				StartTime:     now,
+				ProcessPath:   tr.ProcessPath,
+			}
+			c.putConnLocked(connID, conn)
+			c.pushConnLocked(conn)
+			continue
+		}
+		conn.UploadBytes = tr.Upload
+		conn.DownloadBytes = tr.Download
+		if tr.DestIP != "" {
+			conn.DestIP = tr.DestIP
+		}
+		if conn.Outbound == "" {
+			conn.Outbound = tr.Outbound
+		}
+		if conn.Host == "" {
+			conn.Host = tr.Host
+		}
+		if conn.Domain == "" {
+			conn.Domain = tr.Domain
+		}
+		if conn.ProcessPath == "" {
+			conn.ProcessPath = tr.ProcessPath
+		}
+	}
 }
