@@ -16,10 +16,12 @@
 | BUG-0003 | overlay 路由/规则永远装不上（周期自愈被同步检查短路） | ✅ 已修复 | `944b45300` |
 | BUG-0004 | 每个失败拨号都打一条 ERROR：日志被拨号失败刷满 | ✅ 已修复 | `96d8e1b5f` `527c79e6f` |
 | BUG-0005 | monitor 连接记录只记"打开"半边、字段恒为初值，且每分钟裁剪刷日志 | ✅ 已修复 | `8d6dc2971` |
-| BUG-0006 | 日志上限的键名与 app 不一致导致引擎拒启动；netbird 引擎日志无上限且不在统一目录 | ✅ 已修复（未提交） | — |
-| BUG-0007 | 用户态 netstack 模式隧道 DNS 地址恒为空：带前缀长度的 peer 地址被当裸 IP 解析 | ✅ 已修复（未提交） | — |
-| BUG-0008 | `log.max_size_mb` 是 fork 独有的配置键（上游没有日志轮转）：改为固定 100MB 常量 | ✅ 已修复（未提交） | — |
-| BUG-0009 | netbird 配置：app 写的 `expose_ports` 被 run-all 丢弃、`admin_url`/`package_name`/`UnifiedConfig` 是死配置/死代码、只有私钥的配置被当成"无凭据"（重构为分组 JSON 单文件） | ✅ 已修复（未提交） | — |
+| BUG-0006 | 日志上限的键名与 app 不一致导致引擎拒启动；netbird 引擎日志无上限且不在统一目录 | ✅ 已修复 | `8b059df0d` |
+| BUG-0007 | 用户态 netstack 模式隧道 DNS 地址恒为空：带前缀长度的 peer 地址被当裸 IP 解析 | ✅ 已修复 | `8b059df0d` |
+| BUG-0008 | `log.max_size_mb` 是 fork 独有的配置键（上游没有日志轮转）：改为固定 100MB 常量 | ✅ 已修复 | `8b059df0d` |
+| BUG-0009 | netbird 配置：app 写的 `expose_ports` 被 run-all 丢弃、`admin_url`/`package_name`/`UnifiedConfig` 是死配置/死代码、只有私钥的配置被当成"无凭据"（重构为分组 JSON 单文件） | ✅ 已修复 | `1937cbfa2` |
+
+> BUG-0006～0009 都已提交，但**尚未构建/上机**（下一次 release 产物会一起带上）。
 
 **状态只有三种取值**：`✅ 已修复` / `🟡 已定位、未修复` / `🔴 已知、未定位`。
 每条标题下的第一项 "状态" 写了修复提交与验证到什么程度；`grep -n "^## BUG-" BUGS.md`
@@ -403,7 +405,7 @@ if IsKernelMode() { ReconcileKernelRoute(ExtractNetworkCIDR(resp)) }
 
 ## BUG-0006 日志文件上限的键名与 app 不一致（严格解码直接拒绝启动）；netbird 引擎日志既不在统一目录、也没有上限
 
-* **状态**：✅ 已修复（改动**尚未提交**）。验证到：编译通过（`-tags with_netbird`）、
+* **状态**：✅ 已修复（提交 `8b059df0d`）。验证到：编译通过（`-tags with_netbird`）、
   `check` 对两种键名的实测（见下）、复用写者的单测本来就覆盖循环覆盖语义。
   **netbird 日志落盘那一段没有端到端验证**（需要真实 netbird 凭据跑起来），
   只到"编译 + 路径/上限由已测写者保证"。组件跨两个仓库：
@@ -443,7 +445,7 @@ if IsKernelMode() { ReconcileKernelRoute(ExtractNetworkCIDR(resp)) }
 
 ## BUG-0007 用户态(netstack)模式下隧道 DNS 地址恒为空：带前缀长度的 peer 地址被当裸 IP 解析
 
-* **状态**：✅ 已修复（未提交）。
+* **状态**：✅ 已修复（提交 `8b059df0d`）。
 * **组件**：`experimental/netbird_integration`（`sync_domains.go`、`netbird.go`）。
 * **影响面**：**所有走用户态 netstack 的部署**（`kernelTun=false`：Windows app、Android app）。
   netbird 隧道本身是通的 —— 管理端 stream、ICE、WG 握手、P2P/relay、`/netbird/peers`
@@ -516,7 +518,7 @@ BUG-0001 当时是在 0.76.3 的**内核模式**上验证的，内核模式的�
 
 ## BUG-0008 `log.max_size_mb` 是 fork 独有的配置键：fork 写出的配置上游不认（改为固定 100MB 常量）
 
-* **状态**：✅ 已修复（未提交，未构建/未上机）。
+* **状态**：✅ 已修复（提交 `8b059df0d`，未构建/未上机）。
 * **组件**：`option/options.go`、`log/log.go`、`log/rotate.go`、`log/rotate_test.go`、
   `docs/configuration/log/index.md|index.zh.md`；app 侧 `lib/services/singbox_controller.dart`。
 
@@ -588,11 +590,25 @@ BUG-0001 当时是在 0.76.3 的**内核模式**上验证的，内核模式的�
   另外换上新引擎后要让 app 重启一次，它才会把磁盘上已有的 `sing-box-config.json`
   重写成不带该键的版本。
 
+### 后续变更（2026-10-18）
+
+* app 侧 `_normalizeLogOutput` 的死键清理改成**无条件**：原文只在"输出目标是 `engine.log`"
+  这条分支里清键，配置里写成 `stderr`/`stdout`（或 `disabled`）时死键会原样留在磁盘上 ——
+  那恰好就是新引擎拒绝启动的情形。现在只要出现 `max_size_mb` / `max_file_size_mb` 就重写配置。
+* 同处给**缺失或空的 `log.level` 补 `info`**：引擎缺省是 `trace`（`log/log.go`），
+  netbird 侧早已补 `info`，只有引擎这一边没补；这些行在 Windows 上还会被控制器从 stderr
+  收进 app.log。完全没有 `log` 段的配置会被补一个最小的 `{"level":"info"}`
+  （不动用户没有表达过的输出目标）。
+* `log/rotate.go`：轮转保留比例 **3/4 → 1/2**。保留 r 的写放大是 `1/(1-r)`（每写
+  `(1-r)*maxSize` 字节就要前移 `r*maxSize` 字节），3/4 ⇒ 4×、1/2 ⇒ 2×。代价是保留窗口
+  减半（稳态 50～100 MB），日志是纯诊断数据，换 SSD 写入量减半划算。
+  `rotate_test.go` 的 7 个用例不依赖该比例，无需改动。
+
 ---
 
 ## BUG-0009 netbird 配置：app 写的 `expose_ports` 被丢弃、死配置键与死代码、只有私钥的配置被当成"无凭据"
 
-* **状态**：✅ 已修复（未提交，未构建/未上机）。
+* **状态**：✅ 已修复（提交 `1937cbfa2`，未构建/未上机）。
 * **组件**：`experimental/netbird_integration/`（`config_file.go` 新增、`netbird.go`、
   `netbird_stub.go`、`config_file_test.go` 新增、删 `testdata/unified-example.json`）、
   `cmd/sing-box/cmd_run_all.go`、`cmd/sing-box/cmd_netbird.go`、`test-kernel-tun.sh`、

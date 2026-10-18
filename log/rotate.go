@@ -21,11 +21,12 @@ import (
 // carrying such a key is rejected by upstream sing-box's strict decoder.
 const DefaultLogFileMaxSize int64 = 100 << 20
 
-// rotateKeepRatio is the fraction of the cap kept when the file is rotated.
-// Keeping 3/4 leaves room for new lines before the next rotation, so
-// rotation runs once per maxSize/4 bytes written instead of on every line.
-const rotateKeepNumerator = 3
-const rotateKeepDenominator = 4
+// rotateKeepRatio 是轮转时按上限保留的比例。保留 r 的代价：每写 (1-r)*maxSize
+// 字节就要把 r*maxSize 字节前移一次，落盘量 = 新字节 + 前移字节，即写放大
+// 1/(1-r)（trimLocked 的读放大同样如此）。r=3/4 → 4×，r=1/2 → 2×：保留窗口
+// 小一半，换 SSD 写入量减半。日志是纯诊断数据，这个交换划算。
+const rotateKeepNumerator = 1
+const rotateKeepDenominator = 2
 
 // rotatingFileWriter is an append-only, size-capped writer for the engine log
 // file.
@@ -34,7 +35,7 @@ const rotateKeepDenominator = 4
 // maxSize, the oldest content is dropped and only the newest lines are kept
 // (the file is truncated from the front, never beyond the cap). The most
 // recent logs are therefore always available, and the file never exceeds
-// maxSize (the steady state oscillates between 75% and 100% of the cap).
+// maxSize (the steady state oscillates between 50% and 100% of the cap).
 //
 // The writer is safe for concurrent use (the log factory is called from many
 // goroutines). maxSize <= 0 disables the cap entirely.
