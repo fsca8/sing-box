@@ -11,8 +11,8 @@ import (
 	"testing"
 )
 
-// testConfig intentionally has NO dns-direct server — injection must add one,
-// because a DNS rule referencing a missing server tag is silently skipped.
+// testConfig 的 main 是"无 detour + IP 字面量"的直连解析器：注入的控制面规则
+// 必须复用它（按结构挑选，不认标签名），而不是另造一台或依赖 dns-direct。
 const testConfig = `{
   "dns": {"servers": [{"tag": "main", "address": "223.5.5.5"}], "rules": [{"domain_suffix": ["example.com"], "server": "main"}]},
   "outbounds": [{"type": "direct", "tag": "direct"}, {"type": "vless", "tag": "proxy"}],
@@ -104,16 +104,20 @@ func TestInjectBypassUserspace(t *testing.T) {
 		}
 	}
 
-	// dns-direct rule present
+	// 控制面规则必须指向 profile 里那台直连解析器（"main"），且不额外造 server
 	_, dnsR := ruleList(t, out)
 	foundDNS := false
 	for _, r := range dnsR {
-		if r.(map[string]any)["server"] == "dns-direct" {
+		if m, ok := r.(map[string]any); ok && isControlPlaneDNSRule(m, "main", controlPlaneResolverTag) {
 			foundDNS = true
 		}
 	}
 	if !foundDNS {
-		t.Fatal("no dns-direct rule injected")
+		t.Fatal("no control-plane DNS rule injected (want server main)")
+	}
+	// 只有 profile 自己的 main + 本工具的 nb 传输，没有凭空补的解析器
+	if servers := cfgServers(out); len(servers) != 2 || !servers["main"] || !servers["nb"] {
+		t.Fatalf("dns.servers = %v, want {main, nb} only", servers)
 	}
 
 	// userspace: nb-out outbound + nb-cidr rule-set 规则(静态 ip_cidr 规则
@@ -200,19 +204,19 @@ func TestInjectKernelMode(t *testing.T) {
 	if !declFound {
 		t.Fatal("kernel mode: nb-custom-domains rule-set declaration missing")
 	}
-	// mgmtURL empty → dns-direct rule covers only netbird.io
+	// mgmtURL empty → 控制面规则只覆盖 netbird.io，解析器复用直连的 main
 	foundDNS := false
 	for _, r := range dnsR {
 		m := r.(map[string]any)
-		if m["server"] == "dns-direct" {
-			ds := m["domain_suffix"].([]any)
+		if fmt.Sprint(m["server"]) == "main" {
+			ds, _ := m["domain_suffix"].([]any)
 			if len(ds) == 1 && fmt.Sprint(ds[0]) == "netbird.io" {
 				foundDNS = true
 			}
 		}
 	}
 	if !foundDNS {
-		t.Fatal("kernel mode: dns-direct rule missing or wrong domains")
+		t.Fatal("kernel mode: control-plane rule missing or wrong domains")
 	}
 }
 
@@ -240,12 +244,12 @@ func TestInjectIdempotent(t *testing.T) {
 	_, dnsR := ruleList(t, second)
 	dnsCount := 0
 	for _, r := range dnsR {
-		if r.(map[string]any)["server"] == "dns-direct" {
+		if m, ok := r.(map[string]any); ok && isControlPlaneDNSRule(m, "main", controlPlaneResolverTag) {
 			dnsCount++
 		}
 	}
 	if dnsCount != 1 {
-		t.Fatalf("dns-direct rules after double inject = %d, want 1", dnsCount)
+		t.Fatalf("control-plane rules after double inject = %d, want 1", dnsCount)
 	}
 	var cfg map[string]any
 	json.Unmarshal(second, &cfg)
@@ -272,7 +276,10 @@ func TestInjectExistingManualRulesNotDuplicated(t *testing.T) {
 	    {"domain_suffix": ["netbird.io", "nb.example.wang"], "outbound": "direct"},
 	    {"rule_set": "geosite-geolocation-!cn", "outbound": "proxy"}
 	  ]},
-	  "dns": {"rules": [{"domain_suffix": ["netbird.io", "nb.example.wang"], "server": "dns-direct"}]}
+	  "dns": {
+	    "servers": [{"type": "https", "tag": "my-cn-doh", "server": "223.5.5.5"}],
+	    "rules": [{"domain_suffix": ["netbird.io", "nb.example.wang"], "server": "my-cn-doh"}]
+	  }
 	}`
 	out, err := InjectNetbirdJSON([]byte(cfg), "https://nb.example.wang", nil, "", "")
 	if err != nil {
@@ -285,15 +292,23 @@ func TestInjectExistingManualRulesNotDuplicated(t *testing.T) {
 	if n := countRouteRules(route, "domain-direct"); n != 1 {
 		t.Fatalf("manual domain rule duplicated: %d", n)
 	}
+	// 用户自己写的那条（指向 my-cn-doh）不能重复；注入的那条也复用同一台
+	// 解析器 —— 判据是结构（无 detour + IP 字面量），不是标签名。
 	_, dnsR := ruleList(t, out)
 	dnsCount := 0
 	for _, r := range dnsR {
-		if r.(map[string]any)["server"] == "dns-direct" {
+		if m, ok := r.(map[string]any); ok && isControlPlaneDNSRule(m, "my-cn-doh", controlPlaneResolverTag) {
 			dnsCount++
+			if fmt.Sprint(m["server"]) != "my-cn-doh" {
+				t.Fatalf("control-plane rule must reuse my-cn-doh, got %v", m["server"])
+			}
 		}
 	}
 	if dnsCount != 1 {
-		t.Fatalf("manual dns-direct duplicated: %d", dnsCount)
+		t.Fatalf("control-plane rules = %d, want 1 (manual one replaced, not duplicated)", dnsCount)
+	}
+	if servers := cfgServers(out); len(servers) != 2 || !servers["my-cn-doh"] || !servers["nb"] {
+		t.Fatalf("dns.servers = %v, want {my-cn-doh, nb} only (no invented resolver)", servers)
 	}
 }
 
@@ -613,6 +628,184 @@ func TestInjectCustomDomainRuleSet(t *testing.T) {
 			t.Fatal("dns rule_set ref must not be injected when path empty")
 		}
 	}
+}
+
+// TestInjectDNSRulesPrecedeCatchAll 回归：profile 末尾一条无条件的终结规则
+// 曾经把本工具追加的 DNS 规则整条吃掉 —— 自定义域名解析不出来（公网也没有它
+// 的 A 记录），而且 DNS 规则顺序错位不产生任何告警。注入后本工具的规则必须
+// 排在最前面，顺序为「控制面直连 → nb」。
+func TestInjectDNSRulesPrecedeCatchAll(t *testing.T) {
+	SetKernelMode(false)
+	defer SetKernelMode(false)
+
+	cfg := `{
+	  "dns": {
+	    "servers": [
+	      {"type": "https", "tag": "dns-remote", "server": "1.1.1.1"},
+	      {"type": "local", "tag": "dns-local"}
+	    ],
+	    "rules": [
+	      {"domain_suffix": ["example.org"], "server": "dns-remote"},
+	      {"action": "route", "server": "dns-local"}
+	    ],
+	    "final": "dns-local"
+	  },
+	  "outbounds": [{"type": "direct", "tag": "direct"}],
+	  "route": {"rules": []}
+	}`
+	out, err := InjectNetbirdJSON([]byte(cfg), "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, dnsR := ruleList(t, out)
+	if len(dnsR) < 3 {
+		t.Fatalf("dns rules = %d, want the two injected rules in front of the profile's own", len(dnsR))
+	}
+	if !isControlPlaneDNSRule(dnsR[0].(map[string]any), "dns-remote", controlPlaneResolverTag) {
+		t.Fatalf("dns rules[0] = %v, want the control-plane rule on the direct resolver", dnsR[0])
+	}
+	if !isNbDNSRule(dnsR[1].(map[string]any)) {
+		t.Fatalf("dns rules[1] = %v, want nb-domains → nb right after the control-plane rule", dnsR[1])
+	}
+	// 顺序反了会把控制面 DNS 吸进隧道（自建管理域名常是自定义域名的子域），
+	// 所以 nb 规则不能跑到前面。
+	if isNbDNSRule(dnsR[0].(map[string]any)) {
+		t.Fatal("nb rule must not precede the control-plane rule")
+	}
+	// 幂等：再注入一次不会各多一条，位置也不变。
+	again, err := InjectNetbirdJSON(out, "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, dnsR2 := ruleList(t, again)
+	nbCount, ctlCount := 0, 0
+	for _, r := range dnsR2 {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if isNbDNSRule(m) {
+			nbCount++
+		}
+		if isControlPlaneDNSRule(m, "dns-remote", controlPlaneResolverTag) {
+			ctlCount++
+		}
+	}
+	if nbCount != 1 || ctlCount != 1 {
+		t.Fatalf("after double inject: nb=%d ctl=%d, want 1/1", nbCount, ctlCount)
+	}
+	if !isControlPlaneDNSRule(dnsR2[0].(map[string]any), "dns-remote") || !isNbDNSRule(dnsR2[1].(map[string]any)) {
+		t.Fatalf("double inject moved the injected rules: %v / %v", dnsR2[0], dnsR2[1])
+	}
+}
+
+// TestInjectControlPlaneResolverPickedByStructure 控制面解析器按结构挑：detour
+// 指向 direct 出站的可用，detour 指向代理出站的不可用；标签名与此无关。
+func TestInjectControlPlaneResolverPickedByStructure(t *testing.T) {
+	SetKernelMode(false)
+	defer SetKernelMode(false)
+
+	cfg := `{
+	  "dns": {"servers": [
+	    {"type": "https", "tag": "via-proxy", "server": "1.1.1.1", "detour": "proxy"},
+	    {"type": "https", "tag": "via-direct", "server": "223.5.5.5", "detour": "direct"}
+	  ], "rules": []},
+	  "outbounds": [{"type": "direct", "tag": "direct"}, {"type": "vless", "tag": "proxy"}],
+	  "route": {"rules": []}
+	}`
+	out, err := InjectNetbirdJSON([]byte(cfg), "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, dnsR := ruleList(t, out)
+	if len(dnsR) == 0 || !isControlPlaneDNSRule(dnsR[0].(map[string]any), "via-direct", controlPlaneResolverTag) {
+		t.Fatalf("dns rules[0] = %v, want the control-plane rule on via-direct (via-proxy must be skipped)", dnsR)
+	}
+	if servers := cfgServers(out); len(servers) != 3 || !servers["via-proxy"] || !servers["via-direct"] || !servers["nb"] {
+		t.Fatalf("dns.servers = %v, want the profile's two servers plus nb untouched", servers)
+	}
+}
+
+// TestInjectControlPlaneFallsBackToOwnLocal 解析器全部被代理兜住时，桌面平台补
+// 一台系统解析器 —— 用本工具自己的 tag，不占用/不假设用户的命名。
+func TestInjectControlPlaneFallsBackToOwnLocal(t *testing.T) {
+	SetKernelMode(false)
+	defer SetKernelMode(false)
+	saved := localDNSUnavailable
+	localDNSUnavailable = false // 桌面平台：local 可用
+	defer func() { localDNSUnavailable = saved }()
+
+	cfg := `{
+	  "dns": {"servers": [{"type": "https", "tag": "only-proxy", "server": "1.1.1.1", "detour": "proxy"}], "rules": []},
+	  "outbounds": [{"type": "direct", "tag": "direct"}, {"type": "vless", "tag": "proxy"}],
+	  "route": {"rules": []}
+	}`
+	out, err := InjectNetbirdJSON([]byte(cfg), "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers := cfgServers(out)
+	if !servers[controlPlaneResolverTag] {
+		t.Fatalf("dns.servers = %v, want %q injected when no direct resolver exists", servers, controlPlaneResolverTag)
+	}
+	if servers["dns-direct"] {
+		t.Fatal("must not squat on a user-visible tag like dns-direct")
+	}
+	_, dnsR := ruleList(t, out)
+	if len(dnsR) == 0 || !isControlPlaneDNSRule(dnsR[0].(map[string]any), controlPlaneResolverTag) {
+		t.Fatalf("dns rules[0] = %v, want the control-plane rule on %q", dnsR, controlPlaneResolverTag)
+	}
+}
+
+// TestInjectSkipsUnusableLocalDNS Android 上 `type: local` 不可用（app 未提供
+// localDNSTransport，查询会撞 [::1]:53 connection refused）。此时如果 profile
+// 里只有 local 解析器，就不该硬造一台死解析器并把控制面规则指过去 —— 宁可让
+// profile 自己的规则接手（route 层已强制这些域名直连）。
+func TestInjectSkipsUnusableLocalDNS(t *testing.T) {
+	SetKernelMode(false)
+	defer SetKernelMode(false)
+	saved := localDNSUnavailable
+	localDNSUnavailable = true
+	defer func() { localDNSUnavailable = saved }()
+
+	cfg := `{
+	  "dns": {"servers": [{"type": "local", "tag": "sys"}], "rules": [], "final": "sys"},
+	  "outbounds": [{"type": "direct", "tag": "direct"}],
+	  "route": {"rules": []}
+	}`
+	out, err := InjectNetbirdJSON([]byte(cfg), "https://nb.example.wang", nil, testRuleSetPath, testCIDRPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if servers := cfgServers(out); len(servers) != 2 || !servers["sys"] || !servers["nb"] {
+		t.Fatalf("dns.servers = %v, want {sys, nb} only (no invented resolver on Android)", servers)
+	}
+	_, dnsR := ruleList(t, out)
+	for _, r := range dnsR {
+		if m, ok := r.(map[string]any); ok && isControlPlaneDNSRule(m, "sys", controlPlaneResolverTag) {
+			t.Fatalf("control-plane rule must not be injected when only a dead local resolver exists: %v", m)
+		}
+	}
+	if len(dnsR) == 0 || !isNbDNSRule(dnsR[0].(map[string]any)) {
+		t.Fatalf("nb rule must still be prepended, got %v", dnsR)
+	}
+}
+
+// cfgServers returns the set of dns.servers tags.
+func cfgServers(raw []byte) map[string]bool {
+	tags := make(map[string]bool)
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return tags
+	}
+	dnsSection, _ := cfg["dns"].(map[string]any)
+	servers, _ := dnsSection["servers"].([]any)
+	for _, s := range servers {
+		if m, ok := s.(map[string]any); ok {
+			tags[fmt.Sprint(m["tag"])] = true
+		}
+	}
+	return tags
 }
 
 // TestInjectedDNSRuleServerExists 断言注入的 DNS 规则引用的 server tag 真实

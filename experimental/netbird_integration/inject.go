@@ -4,8 +4,20 @@ package netbird_integration
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
+	"runtime"
+	"strings"
 )
+
+// localDNSUnavailable reports whether `type: local` cannot work on this build's
+// platform. Android has no /etc/resolv.conf: sing-box's `local` server only
+// works when the embedding app supplies a platform transport via
+// PlatformInterface.LocalDNSTransport() (libbox/config.go). singbird's
+// VpnService returns null there, so `local` dials the Go default resolver and
+// every query dies with "read udp [::1]:<port>->[::1]:53: connection refused".
+// Kept as a var so tests can exercise the Android behaviour on any host.
+var localDNSUnavailable = runtime.GOOS == "android"
 
 // kernelMode selects the Linux kernel-TUN data path (Route A):
 //   - netbird creates a real kernel TUN (wt0) instead of the userspace netstack
@@ -25,18 +37,65 @@ func IsKernelMode() bool { return kernelMode }
 // SetKernelMode records whether the kernel-TUN data path is active.
 func SetKernelMode(v bool) { kernelMode = v }
 
-// Rule-set tags referencing the local custom-domain / overlay-CIDR files.
-// They are SEPARATE sets: the DNS rule references only the domain set — a
-// DNS-referenced rule-set carrying ip_cidr rules is rejected by sing-box 1.14
-// ("Legacy Address Filter Fields in DNS rules is deprecated", see
-// writeDomainsRuleSet). The CIDR set is referenced by route rules only.
-// dnsDirectTag 是控制面 DNS 规则引用的 server tag。它必须真实存在于
-// dns.servers，否则 dns/router.go 只会记一条 "transport not found" 并跳过
-// 该规则（控制面域名仍走 dns.final，通常是代理：200-430ms 且查询外泄）。
-const dnsDirectTag = "dns-direct"
+// 控制面 DNS 规则引用的解析器**不是**写死的标签：用户的 dns.servers 里叫
+// 什么都有可能（dns-direct 只是常见约定，可能不存在、可能被改名、也可能被
+// 指到一条走代理的传输）。解析器由 controlPlaneResolver 按结构挑选；只有
+// 当 profile 里根本没有"不经代理"的解析器时，才用下面这个自有命名空间补一台
+// 系统解析器，且只在 local 可用的平台上补。
+const controlPlaneResolverTag = "nb-dns-direct"
 
 const customRuleSetTag = "nb-domains"
 const customCIDRRuleSetTag = "nb-cidr"
+
+// controlPlaneResolver picks the tag of a DNS server that resolves WITHOUT the
+// proxy — the control plane must be resolvable before the tunnel is up, and a
+// proxied resolver would make the engine wait for the very proxy it is trying
+// to establish.
+//
+// 判定只看结构，不看标签名：没有 detour，或 detour 指向一个 direct 类型的
+// 出站。优先挑地址是 IP 字面量（或 type: local）的条目 —— 名字型地址（如
+// doh.pub）还要先解析一次，往往正是依赖本机解析器的那条，最不该被选中。
+// 平台不支持 local 时跳过 local 条目。没有可用条目返回 ""。
+func controlPlaneResolver(raw map[string]any, servers []any) string {
+	directOutbound := make(map[string]bool)
+	if outbounds, ok := raw["outbounds"].([]any); ok {
+		for _, o := range outbounds {
+			if m, ok := o.(map[string]any); ok && str(m["type"]) == "direct" {
+				directOutbound[str(m["tag"])] = true
+			}
+		}
+	}
+	directCapable := func(m map[string]any) bool {
+		tag := str(m["tag"])
+		switch {
+		case tag == "", tag == "nb", tag == "nb-out":
+			return false
+		case str(m["type"]) == "netbird":
+			return false
+		case str(m["type"]) == "local" && localDNSUnavailable:
+			return false
+		}
+		detour := str(m["detour"])
+		return detour == "" || directOutbound[detour]
+	}
+	// 第一轮：地址无需再解析的条目（IP 字面量 / 系统解析器）。
+	for _, s := range servers {
+		m, ok := s.(map[string]any)
+		if !ok || !directCapable(m) {
+			continue
+		}
+		if str(m["type"]) == "local" || isIPLiteral(dnsServerHost(m)) {
+			return str(m["tag"])
+		}
+	}
+	// 第二轮：其余直连条目（名字型地址，可能还要解析一次）。
+	for _, s := range servers {
+		if m, ok := s.(map[string]any); ok && directCapable(m) {
+			return str(m["tag"])
+		}
+	}
+	return ""
+}
 
 // InjectNetbirdJSON adds netbird DNS server, outbound, route/rule-set entries,
 // and the engine-traffic bypass to the raw sing-box config. It returns the
@@ -156,19 +215,16 @@ func InjectNetbirdJSON(rawData []byte, mgmtURL string, ctlIPs []string, ruleSetP
 		})
 	}
 
-	// Control-plane DNS direct. 规则引用的 server 必须真实存在：用户配置里
-	// 已有 dns-direct 就沿用（不改动既有语义），否则补一个 local（直连系统
-	// 解析器）server，避免规则被静默跳过。
-	if !hasServerTag(servers, dnsDirectTag) {
-		servers = append(servers, map[string]any{"type": "local", "tag": dnsDirectTag})
+	// Control-plane resolver（按结构挑，见 controlPlaneResolver）。规则引用的
+	// server 必须真实存在于 dns.servers，否则 dns/router.go 只记一条
+	// "transport not found" 并跳过该规则，控制面域名会退回 dns.final（通常走
+	// 代理：200-430ms 且查询外泄）。profile 里没有直连解析器时才补一台系统
+	// 解析器 —— 用的是本工具自己的 tag，不占用户的标签，也不用猜用户怎么命名。
+	ctlResolver := controlPlaneResolver(raw, servers)
+	if ctlResolver == "" && !localDNSUnavailable {
+		servers = append(servers, map[string]any{"type": "local", "tag": controlPlaneResolverTag})
 		dnsSection["servers"] = servers
-	}
-	if !hasDNSDirectRule(dnsSection, ctlDomains) {
-		dnsRules, _ := dnsSection["rules"].([]any)
-		dnsSection["rules"] = append(dnsRules, map[string]any{
-			"domain_suffix": ctlDomains,
-			"server":        dnsDirectTag,
-		})
+		ctlResolver = controlPlaneResolverTag
 	}
 
 	// Netbird outbound + overlay route rules only in userspace (netstack) mode.
@@ -239,25 +295,53 @@ func InjectNetbirdJSON(rawData []byte, mgmtURL string, ctlIPs []string, ruleSetP
 		})
 	}
 
+	// —— 本工具的 DNS 规则一律**前置** ——
+	// 两条规则原来是 append 到 dns.rules 末尾的，只要 profile 里存在一条无条件
+	// 的终结规则（{"action":"route","server":X} / {"action":"reject"} / 早退的
+	// catch-all），它们就永远不被求值；DNS 规则顺序错位没有任何告警，表现就是
+	// 「自定义域名突然解析不出来、公网也没有它的 A 记录」。前置把这个隐含前提
+	// 去掉：规则顺序由本工具负责，profile 怎么写都行。
+	//
+	// 顺序不能反 —— 控制面直连在前、nb 在后：自建管理域名常是某个自定义域名的
+	// 子域（管理 nb.example.com、自定义 example.com），domain_suffix 会把管理
+	// 域名一并匹配进 nb 规则，把控制面 DNS 送进它自己还没建好的隧道。
+	//
+	// 前置之前先摘掉旧布局/上次注入留下的同款规则：既避免重复，也避免旧的
+	// 那条仍然躺在 catch-all 后面冒充"已注入"。
+	dnsRules, _ := dnsSection["rules"].([]any)
+	dnsRules = detachRule(dnsRules, func(m map[string]any) bool {
+		return isControlPlaneDNSRule(m, ctlResolver, controlPlaneResolverTag)
+	})
+	if ruleSetPath != "" {
+		dnsRules = detachRule(dnsRules, isNbDNSRule)
+	}
+
+	var dnsPrepended []any
+	if ctlResolver != "" {
+		dnsPrepended = append(dnsPrepended, map[string]any{
+			"domain_suffix": ctlDomains,
+			"server":        ctlResolver,
+		})
+	}
 	// Custom domains → nb DNS transport (both kernel-TUN and userspace: the
 	// kernel route handles overlay IPs, but domain resolution still needs the
 	// tunnel DNS). References ONLY the domain rule-set (an IP-bearing set
 	// referenced by a DNS rule is rejected by the 1.14 legacy-address-filter
 	// check).
 	if ruleSetPath != "" {
-		dnsRules, _ := dnsSection["rules"].([]any)
-		if !hasRuleSetRule(dnsRules, customRuleSetTag) {
-			dnsSection["rules"] = append(dnsRules, map[string]any{
-				"rule_set": customRuleSetTag,
-				"server":   "nb",
-			})
-		}
+		dnsPrepended = append(dnsPrepended, map[string]any{
+			"rule_set": customRuleSetTag,
+			"server":   "nb",
+		})
+	}
+	if len(dnsPrepended) > 0 {
+		dnsSection["rules"] = append(dnsPrepended, dnsRules...)
 	}
 
 	// 注意: 不做 final=nb 兜底。兜底会让所有未命中规则的域名(非 CN 冷门
 	// 域名、rule_set 异步加载期间的域名)先走隧道 DNS —— 引擎在但隧道
 	// 不通时一次解析 5s 超时 + fallback 5s, 直接卡死。自定义域名靠上面的
-	// customDomains 显式规则(引擎 sync 成功后注入), 不影响其他域名。
+	// nb-domains 显式规则(引擎 sync 成功后注入), 不影响其他域名。
 	// final 保持用户 profile 原样(通常 dns-remote 走代理, 快)。
 
 	return json.Marshal(raw)
@@ -363,27 +447,101 @@ func hasDomainDirectRule(rules []any, domains []string) bool {
 	return false
 }
 
-// hasDNSDirectRule reports whether dns.rules already route all of domains to
-// the built-in dns-direct server.
-func hasDNSDirectRule(dnsSection map[string]any, domains []string) bool {
-	rules, _ := dnsSection["rules"].([]any)
-	for _, r := range rules {
-		rule, ok := r.(map[string]any)
-		if !ok {
-			continue
-		}
-		if fmt.Sprint(rule["server"]) != dnsDirectTag {
-			continue
-		}
-		ds, ok := rule["domain_suffix"].([]any)
-		if !ok {
-			continue
-		}
-		if containsAll(ds, domains) {
-			return true
+// isControlPlaneDNSRule matches a rule with the same intent as the one this
+// tool injects: {"domain_suffix": [...netbird.io...], "server": <a direct
+// resolver>}. servers 传入本轮挑中的 tag 与本工具自有的 tag —— 这样既能摘掉
+// 上一次注入的遗留（解析器 tag 可能因 profile 改动而变），也不会去动用户写
+// 的、指向别的解析器的规则。键集合必须恰好是 domain_suffix + server。
+func isControlPlaneDNSRule(m map[string]any, servers ...string) bool {
+	if !hasExactKeys(m, "domain_suffix", "server") {
+		return false
+	}
+	srv := str(m["server"])
+	matched := false
+	for _, s := range servers {
+		if s != "" && srv == s {
+			matched = true
+			break
 		}
 	}
-	return false
+	if !matched {
+		return false
+	}
+	ds, ok := m["domain_suffix"].([]any)
+	return ok && containsAll(ds, []string{"netbird.io"})
+}
+
+// isNbDNSRule matches the generated {"rule_set": "nb-domains", "server": "nb"}.
+func isNbDNSRule(m map[string]any) bool {
+	return hasExactKeys(m, "rule_set", "server") &&
+		str(m["rule_set"]) == customRuleSetTag &&
+		str(m["server"]) == "nb"
+}
+
+// detachRule returns rules minus the entries for which match reports true.
+func detachRule(rules []any, match func(map[string]any) bool) []any {
+	kept := make([]any, 0, len(rules))
+	for _, r := range rules {
+		if m, ok := r.(map[string]any); ok && match(m) {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept
+}
+
+// hasExactKeys reports whether m contains exactly the given keys (no extra
+// matchers, no extra actions).
+func hasExactKeys(m map[string]any, keys ...string) bool {
+	if len(m) != len(keys) {
+		return false
+	}
+	for _, k := range keys {
+		if _, ok := m[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// str renders a JSON value as a string. fmt.Sprint would turn a missing key
+// into "<nil>", which is exactly the kind of phantom tag that makes a rule
+// silently reference a non-existent server.
+func str(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprint(v)
+}
+
+// dnsServerHost extracts the host from a DNS server entry's address field:
+// both the 1.14 form ({"server": "1.1.1.1"}) and the legacy one
+// ({"address": "tls://1.1.1.1:853"}) are understood.
+func dnsServerHost(m map[string]any) string {
+	v := str(m["server"])
+	if v == "" {
+		v = str(m["address"])
+	}
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+3:]
+	}
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	if strings.HasPrefix(v, "[") {
+		if j := strings.IndexByte(v, ']'); j > 0 {
+			v = v[1:j]
+		}
+	}
+	if h, _, err := net.SplitHostPort(v); err == nil {
+		v = h
+	}
+	return v
+}
+
+// isIPLiteral reports whether host is an IP address (no resolution needed).
+func isIPLiteral(host string) bool {
+	return net.ParseIP(strings.TrimSuffix(host, ".")) != nil
 }
 
 func containsAll(haystack []any, needles []string) bool {
