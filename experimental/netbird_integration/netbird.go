@@ -53,6 +53,51 @@ type StartAllResult struct {
 // private_key all empty, no environment fallback), returns the original
 // singBoxConfig unchanged with Engine=nil.
 func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
+	return startAll(cfg, singBoxConfig, true)
+}
+
+// StartEngine starts the netbird engine only, without touching the sing-box
+// config. It is the "hot enable" primitive: when the scaffolding is already in
+// the loaded config (see InjectOnly), switching netbird back on must neither
+// reload sing-box nor rebuild the TUN — only the engine is missing.
+//
+// The sync/DNS/bridge wiring inside startAll still runs, so the toolkit works
+// right after a hot start.
+func StartEngine(cfg *Config) (*StartAllResult, error) {
+	return startAll(cfg, nil, false)
+}
+
+// InjectOnly injects the netbird scaffolding (dns server `nb`, outbound
+// `nb-out`, and the two rule-set references) into singBoxConfig WITHOUT
+// starting the engine.
+//
+// This is what makes the enable switch cheap: the scaffolding is always part
+// of the loaded config, so enabling netbird later only starts the engine, and
+// disabling it leaves the rules in place where they fail closed (the outbound
+// returns context.Canceled without a client, the DNS transport answers
+// SERVFAIL instead of leaking those names to public DNS).
+func InjectOnly(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
+	result := &StartAllResult{ModifiedConfig: singBoxConfig}
+	if cfg == nil || !cfg.hasCredentials() {
+		return result, nil
+	}
+	ruleSetPath := domainsRuleSetPath(cfg)
+	cidrPath := cidrRuleSetPath(cfg)
+	// Create missing files only: a previous run's domains/CIDR stay valid, and
+	// the engine rewrites them as soon as it syncs again.
+	ensureRuleSetFiles(ruleSetPath, cidrPath)
+	modified, err := InjectNetbirdJSON(singBoxConfig, cfg.Device.ManagementURL, resolveControlPlaneIPs(cfg), ruleSetPath, cidrPath)
+	if err != nil {
+		log.Warn("netbird: inject scaffolding: ", err)
+		return result, nil
+	}
+	result.ModifiedConfig = modified
+	return result, nil
+}
+
+// startAll is the shared body of StartAll (inject=true) and StartEngine
+// (inject=false).
+func startAll(cfg *Config, singBoxConfig []byte, inject bool) (*StartAllResult, error) {
 	result := &StartAllResult{}
 
 	if cfg == nil {
@@ -74,28 +119,9 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 
 	t0 := time.Now()
 
-	// DNS 预热 + 控制面 IP 收集: 解析 mgmt 主机名。首次启动时系统 DNS
-	// 冷缓存 + IPv6 AAAA 查询挂起(i/o timeout)会让引擎的 mgmt 连接慢到
-	// 20s+, 吃掉 60s 启动预算导致首启失败; 此处提前解析, 引擎 Start 时
-	// 走热缓存(自建部署 mgmt/relay/signal 同域名, 一次预热全覆盖)。
-	// 位于 engine.Start() 之前, 不计入引擎启动超时。解析出的 IP 同时
-	// 用于注入控制面 ip_cidr → direct 规则(见 InjectNetbirdJSON)。
-	// 注: 引擎侧控制面域名解析已全部改为 IPv4-only(LookupNetIP "ip4",
-	// netbird my_custom 分支), 彻底绕开 AAAA 慢查询。预热带 3s 超时,
-	// 避免无网络时解析挂起拖慢骨架返回。
-	var ctlIPs []string
-	if u, err := url.Parse(cfg.Device.ManagementURL); err == nil && u.Hostname() != "" {
-		dnsCtx, dnsCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		addrs, err := net.DefaultResolver.LookupIP(dnsCtx, "ip4", u.Hostname())
-		dnsCancel()
-		if err == nil {
-			for _, a := range addrs {
-				if ip4 := a.To4(); ip4 != nil {
-					ctlIPs = append(ctlIPs, ip4.String()+"/32")
-				}
-			}
-		}
-	}
+	// DNS 预热 + 控制面 IP 收集。必须在 engine.Start() 之前 — 理由见
+	// resolveControlPlaneIPs 的注释。
+	ctlIPs := resolveControlPlaneIPs(cfg)
 
 	engine := NewEngine(cfg)
 	engineStarted := false
@@ -180,33 +206,24 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	// 变更时重写即运行时生效, 无需重载服务。文件必须存在(缺失会导致配置
 	// 加载失败): 首次运行创建默认文件, 后续运行保留上次持久化的内容
 	// (异步路径下引擎尚未 sync 时依然生效)。
-	ruleSetPath := domainsRuleSetPath(cfg)
-	cidrPath := cidrRuleSetPath(cfg)
-	if engineStarted {
-		if err := engine.writeDomainsFiles(customDomains, networkCIDR); err != nil {
-			log.Warn("netbird: write domains rule-set: ", err)
-		}
-	} else {
-		// 只创建缺失的文件(勿整体重写 — 异步路径下旧文件里的域名/CIDR
-		// 在引擎 sync 前依然有效, 整体覆盖会清空它们)。
-		if _, err := os.Stat(ruleSetPath); os.IsNotExist(err) {
-			if err := writeDomainsRuleSet(ruleSetPath, nil); err != nil {
-				log.Warn("netbird: create default domains rule-set: ", err)
+	if inject {
+		ruleSetPath := domainsRuleSetPath(cfg)
+		cidrPath := cidrRuleSetPath(cfg)
+		if engineStarted {
+			if err := engine.writeDomainsFiles(customDomains, networkCIDR); err != nil {
+				log.Warn("netbird: write domains rule-set: ", err)
 			}
+		} else {
+			ensureRuleSetFiles(ruleSetPath, cidrPath)
 		}
-		if _, err := os.Stat(cidrPath); os.IsNotExist(err) {
-			if err := writeCidrRuleSet(cidrPath, ""); err != nil {
-				log.Warn("netbird: create default cidr rule-set: ", err)
-			}
+		modified, err := InjectNetbirdJSON(singBoxConfig, cfg.Device.ManagementURL, ctlIPs, ruleSetPath, cidrPath)
+		if err != nil {
+			// Non-fatal: sing-box still runs, just without netbird rules
+			log.Warn("inject netbird config: ", err)
+			result.ModifiedConfig = singBoxConfig
+		} else {
+			result.ModifiedConfig = modified
 		}
-	}
-	modified, err := InjectNetbirdJSON(singBoxConfig, cfg.Device.ManagementURL, ctlIPs, ruleSetPath, cidrPath)
-	if err != nil {
-		// Non-fatal: sing-box still runs, just without netbird rules
-		log.Warn("inject netbird config: ", err)
-		result.ModifiedConfig = singBoxConfig
-	} else {
-		result.ModifiedConfig = modified
 	}
 	result.Engine = engine
 
@@ -219,6 +236,50 @@ func StartAll(cfg *Config, singBoxConfig []byte) (*StartAllResult, error) {
 	// 排除列表中, 不会把引擎自身接口变化误判为物理网络变化。
 	go watchNetworkChanges(engine)
 	return result, nil
+}
+
+// resolveControlPlaneIPs resolves the management host name and returns its
+// IPv4 addresses as /32 prefixes, for the "control plane → direct" bypass rule
+// that InjectNetbirdJSON writes.
+//
+// 首次启动时系统 DNS 冷缓存 + IPv6 AAAA 查询挂起(i/o timeout)会让引擎的 mgmt
+// 连接慢到 20s+, 吃掉 60s 启动预算导致首启失败; 此处提前解析, 引擎 Start 时
+// 走热缓存(自建部署 mgmt/relay/signal 同域名, 一次预热全覆盖)。调用方必须
+// 在 engine.Start() 之前调用, 预热带 3s 超时避免无网络时拖慢骨架返回。
+// 注: 引擎侧控制面域名解析已全部改为 IPv4-only(LookupNetIP "ip4",
+// netbird my_custom 分支), 彻底绕开 AAAA 慢查询。
+func resolveControlPlaneIPs(cfg *Config) []string {
+	var ctlIPs []string
+	if u, err := url.Parse(cfg.Device.ManagementURL); err == nil && u.Hostname() != "" {
+		dnsCtx, dnsCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		addrs, err := net.DefaultResolver.LookupIP(dnsCtx, "ip4", u.Hostname())
+		dnsCancel()
+		if err == nil {
+			for _, a := range addrs {
+				if ip4 := a.To4(); ip4 != nil {
+					ctlIPs = append(ctlIPs, ip4.String()+"/32")
+				}
+			}
+		}
+	}
+	return ctlIPs
+}
+
+// ensureRuleSetFiles creates the two rule-set files when they are missing.
+// 只创建缺失的文件(勿整体重写 — 异步路径下旧文件里的域名/CIDR 在引擎 sync
+// 前依然有效, 整体覆盖会清空它们)。文件必须存在: 配置里引用了它们, 缺失会
+// 让 sing-box 加载失败。
+func ensureRuleSetFiles(ruleSetPath, cidrPath string) {
+	if _, err := os.Stat(ruleSetPath); os.IsNotExist(err) {
+		if err := writeDomainsRuleSet(ruleSetPath, nil); err != nil {
+			log.Warn("netbird: create default domains rule-set: ", err)
+		}
+	}
+	if _, err := os.Stat(cidrPath); os.IsNotExist(err) {
+		if err := writeCidrRuleSet(cidrPath, ""); err != nil {
+			log.Warn("netbird: create default cidr rule-set: ", err)
+		}
+	}
 }
 
 // startBridges creates the configured overlay→local TCP forwards. Bridges
